@@ -1,0 +1,388 @@
+"""Normal Inverse Gaussian (NIG) distribution with time evolution.
+
+References:
+    Barndorff-Nielsen, O.E. (1997). Normal Inverse Gaussian Distributions and
+    Stochastic Volatility Modelling. Scandinavian Journal of Statistics, 24(1), 1-13.
+
+    Barndorff-Nielsen, O.E. (1998). Processes of Normal Inverse Gaussian Type.
+    Finance and Stochastics, 2(1), 41-68.
+"""
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+import numpy as np
+from numpy.typing import NDArray
+from scipy import special
+
+from ..core.distribution import TimeEvolvingDistribution
+
+if TYPE_CHECKING:
+    from ..core.volatility import VolatilityModel
+
+
+@dataclass(frozen=True)
+class NIGParameters:
+    """
+    Parameters for the Normal Inverse Gaussian distribution.
+
+    The NIG distribution is parameterized by four quantities:
+    - mu: Location parameter (real)
+    - delta: Scale parameter (> 0) - initial scale at t=0
+    - alpha: Steepness/tail heaviness (> |beta|)
+    - beta: Skewness parameter (|beta| < alpha)
+
+    For time evolution, you can use either:
+    1. Simple linear growth: delta_growth parameter
+    2. Sophisticated models: volatility_model parameter
+
+    If volatility_model is provided, it overrides delta_growth.
+
+    Examples:
+        # Simple linear growth (legacy)
+        params = NIGParameters(mu=0, delta=0.02, alpha=15, beta=-2, delta_growth=0.05)
+
+        # Mean-reverting volatility
+        from temporalpdf import mean_reverting
+        params = NIGParameters(
+            mu=0, delta=0.03,  # Current elevated vol
+            alpha=15, beta=-2,
+            volatility_model=mean_reverting(sigma_long=0.02, kappa=0.1)
+        )
+
+        # GARCH-style forecast
+        from temporalpdf import garch_forecast
+        params = NIGParameters(
+            mu=0, delta=0.025, alpha=15, beta=-2,
+            volatility_model=garch_forecast(omega=0.00001, alpha=0.1, beta=0.85)
+        )
+
+    Constraints:
+        alpha > 0, delta > 0, |beta| < alpha
+    """
+
+    mu: float
+    delta: float
+    alpha: float
+    beta: float
+    mu_drift: float = 0.0
+    delta_growth: float = 0.0
+    volatility_model: "VolatilityModel | None" = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.delta <= 0:
+            raise ValueError(f"delta must be positive, got {self.delta}")
+        if self.alpha <= 0:
+            raise ValueError(f"alpha must be positive, got {self.alpha}")
+        if abs(self.beta) >= self.alpha:
+            raise ValueError(
+                f"|beta| must be less than alpha, got |{self.beta}| >= {self.alpha}"
+            )
+
+    def _delta_at_time(self, t: float) -> float:
+        """Compute delta at time t using the configured volatility model."""
+        if self.volatility_model is not None:
+            return self.volatility_model.at_time(self.delta, t)
+        return self.delta * (1 + self.delta_growth * t)
+
+    def _delta_at_times(self, t: np.ndarray) -> np.ndarray:
+        """Compute delta at multiple times (vectorized)."""
+        if self.volatility_model is not None:
+            return self.volatility_model.at_times(self.delta, t)
+        return self.delta * (1 + self.delta_growth * t)
+
+
+class NIGDistribution(TimeEvolvingDistribution[NIGParameters]):
+    """
+    Normal Inverse Gaussian (NIG) distribution with time evolution.
+
+    The NIG distribution is a four-parameter family that captures:
+    - Semi-heavy tails (heavier than Normal, lighter than Pareto)
+    - Asymmetry/skewness
+    - Excess kurtosis
+
+    It is widely used in financial modeling because:
+    1. Closed under convolution (daily -> weekly returns tractable)
+    2. Captures stylized facts of financial returns
+    3. Has interpretable parameters
+
+    Mathematical formulation:
+        f(x; α, β, μ, δ) = (αδ/π) * exp(δγ + β(x-μ)) * K₁(α*q(x)) / q(x)
+
+    where:
+        γ = sqrt(α² - β²)
+        q(x) = sqrt(δ² + (x - μ)²)
+        K₁ is the modified Bessel function of the second kind
+
+    References:
+        Barndorff-Nielsen, O.E. (1997). Normal Inverse Gaussian Distributions
+        and Stochastic Volatility Modelling.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Normal Inverse Gaussian (NIG)"
+
+    @property
+    def parameter_names(self) -> tuple[str, ...]:
+        return ("mu", "delta", "alpha", "beta", "mu_drift", "delta_growth")
+
+    def pdf(
+        self,
+        x: NDArray[np.float64],
+        t: float,
+        params: NIGParameters,
+    ) -> NDArray[np.float64]:
+        """
+        Evaluate the NIG probability density function.
+
+        Args:
+            x: Array of values to evaluate
+            t: Time point
+            params: Distribution parameters
+
+        Returns:
+            Array of probability density values
+        """
+        x = np.asarray(x, dtype=np.float64)
+
+        # Time-evolved parameters
+        mu_t = params.mu + params.mu_drift * t
+        delta_t = params._delta_at_time(t)
+
+        alpha = params.alpha
+        beta = params.beta
+
+        # Derived quantity
+        gamma = np.sqrt(alpha**2 - beta**2)
+
+        # Argument for Bessel function: q(x) = sqrt(delta^2 + (x - mu)^2)
+        q_x = np.sqrt(delta_t**2 + (x - mu_t) ** 2)
+
+        # Prevent numerical issues with very small q values
+        q_x = np.maximum(q_x, 1e-300)
+
+        # Log-space computation for numerical stability
+        log_pdf = (
+            np.log(alpha)
+            + np.log(delta_t)
+            - np.log(np.pi)
+            + delta_t * gamma
+            + beta * (x - mu_t)
+            + np.log(special.kv(1, alpha * q_x))
+            - np.log(q_x)
+        )
+
+        return np.exp(log_pdf)
+
+    def pdf_matrix(
+        self,
+        x: NDArray[np.float64],
+        time_grid: NDArray[np.float64],
+        params: NIGParameters,
+    ) -> NDArray[np.float64]:
+        """
+        Evaluate the PDF over a 2D grid of (time, value).
+
+        Vectorized implementation for performance.
+
+        Args:
+            x: Array of values (value axis)
+            time_grid: Array of time points (time axis)
+            params: Distribution parameters
+
+        Returns:
+            2D array of shape (len(time_grid), len(x))
+        """
+        x = np.asarray(x, dtype=np.float64)
+        time_grid = np.asarray(time_grid, dtype=np.float64)
+
+        # Broadcast: time_grid[:, None] and x[None, :]
+        t = time_grid[:, np.newaxis]  # (T, 1)
+
+        # Time-evolved parameters (broadcasting)
+        mu_t = params.mu + params.mu_drift * t  # (T, 1)
+        delta_t = params._delta_at_times(time_grid)[:, np.newaxis]  # (T, 1)
+
+        alpha = params.alpha
+        beta = params.beta
+        gamma = np.sqrt(alpha**2 - beta**2)
+
+        # Compute q(x) for all (t, x) pairs
+        q_x = np.sqrt(delta_t**2 + (x - mu_t) ** 2)  # (T, N)
+        q_x = np.maximum(q_x, 1e-300)
+
+        # Log-space computation
+        log_pdf = (
+            np.log(alpha)
+            + np.log(delta_t)
+            - np.log(np.pi)
+            + delta_t * gamma
+            + beta * (x - mu_t)
+            + np.log(special.kv(1, alpha * q_x))
+            - np.log(q_x)
+        )
+
+        return np.exp(log_pdf)
+
+    def cdf(
+        self,
+        x: NDArray[np.float64],
+        t: float,
+        params: NIGParameters,
+    ) -> NDArray[np.float64]:
+        """
+        Cumulative distribution function (numerical integration).
+
+        Args:
+            x: Array of values
+            t: Time point
+            params: Distribution parameters
+
+        Returns:
+            Array of CDF values
+        """
+        x = np.asarray(x, dtype=np.float64)
+
+        # Create fine grid for integration
+        x_min = x.min() - 10 * params.delta
+        x_max = x.max()
+
+        # Integration grid
+        n_points = 10000
+        x_grid = np.linspace(x_min, x_max, n_points)
+        pdf_grid = self.pdf(x_grid, t, params)
+
+        # Cumulative integration
+        dx = x_grid[1] - x_grid[0]
+        cdf_grid = np.cumsum(pdf_grid) * dx
+
+        # Interpolate to requested points
+        return np.interp(x, x_grid, cdf_grid)
+
+    def ppf(
+        self,
+        q: NDArray[np.float64],
+        t: float,
+        params: NIGParameters,
+    ) -> NDArray[np.float64]:
+        """
+        Percent point function (quantile function / inverse CDF).
+
+        Args:
+            q: Array of quantiles (0 < q < 1)
+            t: Time point
+            params: Distribution parameters
+
+        Returns:
+            Array of values corresponding to quantiles
+        """
+        q = np.asarray(q, dtype=np.float64)
+
+        # Time-evolved parameters for determining range
+        mu_t = params.mu + params.mu_drift * t
+        delta_t = params._delta_at_time(t)
+
+        # Create grid spanning likely range
+        x_min = mu_t - 10 * delta_t
+        x_max = mu_t + 10 * delta_t
+
+        n_points = 10000
+        x_grid = np.linspace(x_min, x_max, n_points)
+        cdf_grid = self.cdf(x_grid, t, params)
+
+        # Interpolate to find x values for given quantiles
+        return np.interp(q, cdf_grid, x_grid)
+
+    def mean(self, t: float, params: NIGParameters) -> float:
+        """
+        Expected value of the distribution.
+
+        E[X] = mu + delta * beta / gamma
+        """
+        mu_t = params.mu + params.mu_drift * t
+        delta_t = params._delta_at_time(t)
+        gamma = np.sqrt(params.alpha**2 - params.beta**2)
+
+        return mu_t + delta_t * params.beta / gamma
+
+    def variance(self, t: float, params: NIGParameters) -> float:
+        """
+        Variance of the distribution.
+
+        Var[X] = delta * alpha^2 / gamma^3
+        """
+        delta_t = params._delta_at_time(t)
+        gamma = np.sqrt(params.alpha**2 - params.beta**2)
+
+        return delta_t * params.alpha**2 / gamma**3
+
+    def skewness(self, t: float, params: NIGParameters) -> float:
+        """
+        Skewness of the distribution.
+
+        Skew[X] = 3 * beta / (alpha * sqrt(delta * gamma))
+        """
+        delta_t = params._delta_at_time(t)
+        gamma = np.sqrt(params.alpha**2 - params.beta**2)
+
+        return 3 * params.beta / (params.alpha * np.sqrt(delta_t * gamma))
+
+    def kurtosis(self, t: float, params: NIGParameters) -> float:
+        """
+        Excess kurtosis of the distribution.
+
+        Kurt[X] = 3 * (1 + 4*beta^2/alpha^2) / (delta * gamma)
+        """
+        delta_t = params._delta_at_time(t)
+        gamma = np.sqrt(params.alpha**2 - params.beta**2)
+
+        return 3 * (1 + 4 * params.beta**2 / params.alpha**2) / (delta_t * gamma)
+
+    def sample(
+        self,
+        n: int,
+        t: float,
+        params: NIGParameters,
+        rng: np.random.Generator | None = None,
+    ) -> NDArray[np.float64]:
+        """
+        Draw n samples from the NIG distribution.
+
+        Uses the normal-variance mixture representation:
+            X = mu + beta*V + sqrt(V)*Z
+        where V ~ InverseGaussian(delta, gamma) and Z ~ N(0,1).
+
+        Args:
+            n: Number of samples
+            t: Time point
+            params: Distribution parameters
+            rng: Random number generator
+
+        Returns:
+            Array of n samples
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+
+        # Time-evolved parameters
+        mu_t = params.mu + params.mu_drift * t
+        delta_t = params._delta_at_time(t)
+        gamma = np.sqrt(params.alpha**2 - params.beta**2)
+
+        # Sample from Inverse Gaussian
+        # Using the transformation method
+        chi = rng.standard_normal(n) ** 2
+        v = delta_t / gamma
+        w = v + (v**2 * chi - v * np.sqrt(chi * (4 * v + v**2 * chi))) / 2
+
+        # Uniform for rejection
+        u = rng.uniform(size=n)
+        mask = u > v / (v + w)
+        w[mask] = v**2 / w[mask]
+
+        # Normal component
+        z = rng.standard_normal(n)
+
+        # NIG samples
+        return mu_t + params.beta * w + np.sqrt(w) * z

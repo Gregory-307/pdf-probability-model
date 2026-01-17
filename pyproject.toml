@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "temporalpdf"
+version = "0.1.0"
+description = "Time-evolving probability distribution modeling library"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Greg Butcher", email = "gregbutcher307@gmail.com" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Typing :: Typed",
+]
+keywords = ["probability", "statistics", "time-series", "pdf", "distribution", "forecasting"]
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.2.0",
+    "matplotlib>=3.7.0",
+    "statsmodels>=0.14.0",
+    "PyWavelets>=1.4.0",
+    "plotly>=5.18.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+    "pandas-stubs>=2.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Gregory-307/temporalpdf"
+Repository = "https://github.com/Gregory-307/temporalpdf"
+Issues = "https://github.com/Gregory-307/temporalpdf/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/temporalpdf"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
