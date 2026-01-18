@@ -46,6 +46,11 @@ dev = [
     "ruff>=0.1.0",
     "pandas-stubs>=2.0.0",
 ]
+showcase = [
+    "yfinance>=0.2.0",
+    "jupyter>=1.0.0",
+    "nbformat>=5.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/Gregory-307/temporalpdf"

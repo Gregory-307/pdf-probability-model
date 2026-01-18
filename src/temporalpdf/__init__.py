@@ -149,6 +149,20 @@ from .analysis.decomposition import (
     get_dominant_frequencies,
 )
 
+# Utilities
+from .utilities import (
+    # Fitting
+    fit,
+    fit_nig,
+    fit_student_t,
+    fit_normal,
+    # Selection & comparison
+    select_best_distribution,
+    compare_distributions,
+    # Backtesting
+    rolling_var_backtest,
+)
+
 
 def evaluate(
     distribution: str | TimeEvolvingDistribution,  # type: ignore[type-arg]
@@ -296,4 +310,14 @@ __all__ = [
     "get_dominant_frequencies",
     # Convenience functions
     "evaluate",
+    # Utilities - Fitting
+    "fit",
+    "fit_nig",
+    "fit_student_t",
+    "fit_normal",
+    # Utilities - Selection & comparison
+    "select_best_distribution",
+    "compare_distributions",
+    # Utilities - Backtesting
+    "rolling_var_backtest",
 ]

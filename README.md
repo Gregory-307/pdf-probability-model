@@ -36,6 +36,29 @@ Same point prediction. Radically different investment decisions.
 - **Time Evolution**: Parameters that drift and grow over prediction horizons
 - **Interactive Visualization**: Rotatable 3D plots with Plotly
 
+## Showcase: VaR-Filtered Trading
+
+**Setup**: XGBoost predicts returns and volatility. Filter trades by VaR(5%).
+
+**Comparison**: Normal VaR vs NIG VaR (temporalpdf)
+
+```bash
+pip install temporalpdf[showcase]
+python showcase/two_pipelines.py
+```
+
+**Results (Bitcoin, 657 test days):**
+
+| Pipeline | Trades | Total PnL | Sharpe |
+|----------|--------|-----------|--------|
+| No filter | 329 | +4.2% | 0.005 |
+| Normal VaR | 280 | -7.5% | -0.011 |
+| **NIG VaR** | 318 | **+11.8%** | **0.015** |
+
+Normal VaR filters incorrectly (loses money). NIG VaR filters correctly (3x Sharpe).
+
+![VaR Comparison](showcase/var_comparison.png)
+
 ## Installation
 
 ```bash
@@ -179,11 +202,12 @@ p_big_loss = tpdf.prob_less_than(dist, params, threshold=-0.05)
 
 ## Examples
 
-See `examples/` directory:
+See `examples/`:
 
-- `basic_usage.py`: Core functionality
-- `real_data_example.py`: Real Nordic stock data analysis
-- `custom_distribution.py`: Extending with custom distributions
+- `basic_usage.py` - Core functionality
+- `financial_modeling.py` - Financial modeling workflow
+- `real_data_example.py` - Real data analysis
+- `custom_distribution.py` - Custom distributions
 
 ## API Reference
 
