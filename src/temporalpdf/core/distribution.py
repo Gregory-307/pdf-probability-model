@@ -2,9 +2,12 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TypeVar, Generic
+from typing import TypeVar, Generic, Protocol, runtime_checkable, TYPE_CHECKING
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import NDArray, ArrayLike
+
+if TYPE_CHECKING:
+    from ..temporal.weights.base import WeightScheme
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,42 @@ class DistributionParameters:
 
 
 P = TypeVar("P", bound=DistributionParameters)
+
+
+# =============================================================================
+# V2 PROTOCOL - The minimal interface all distributions MUST implement
+# =============================================================================
+
+
+@runtime_checkable
+class Distribution(Protocol):
+    """
+    Protocol that all distributions must implement (V2 API).
+
+    This is the minimal interface required for integration with the
+    temporal modeling pipeline, backtesting, and decision utilities.
+    """
+
+    def pdf(self, x: ArrayLike, t: float, params: DistributionParameters) -> ArrayLike:
+        """Probability density function."""
+        ...
+
+    def cdf(self, x: ArrayLike, t: float, params: DistributionParameters) -> ArrayLike:
+        """Cumulative distribution function."""
+        ...
+
+    def ppf(self, q: ArrayLike, t: float, params: DistributionParameters) -> ArrayLike:
+        """Percent point function (inverse CDF / quantile function)."""
+        ...
+
+    def sample(self, n: int, t: float, params: DistributionParameters) -> ArrayLike:
+        """Generate random samples."""
+        ...
+
+
+# =============================================================================
+# V1 ABC - Kept for backwards compatibility
+# =============================================================================
 
 
 class TimeEvolvingDistribution(ABC, Generic[P]):

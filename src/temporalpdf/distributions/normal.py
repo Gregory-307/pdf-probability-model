@@ -122,3 +122,31 @@ class NormalDistribution(TimeEvolvingDistribution[NormalParameters]):
         mu_t = params.mu_0 + params.delta * t
         sigma_t = params.sigma_0 * (1 + params.beta * t)
         return norm.ppf(p, loc=mu_t, scale=sigma_t)
+
+    # V2 API alias
+    ppf = quantile
+
+    def sample(
+        self,
+        n: int,
+        t: float,
+        params: NormalParameters,
+        rng: np.random.Generator | None = None,
+    ) -> NDArray[np.float64]:
+        """
+        Draw n samples from the Normal distribution.
+
+        Args:
+            n: Number of samples
+            t: Time point
+            params: Distribution parameters
+            rng: Random number generator (optional)
+
+        Returns:
+            Array of n samples
+        """
+        mu_t = params.mu_0 + params.delta * t
+        sigma_t = params.sigma_0 * (1 + params.beta * t)
+        if rng is None:
+            rng = np.random.default_rng()
+        return rng.normal(loc=mu_t, scale=sigma_t, size=n)

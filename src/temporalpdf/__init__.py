@@ -163,6 +163,44 @@ from .utilities import (
     rolling_var_backtest,
 )
 
+# V2 API - Core result types
+from .core.result import RiskMetric, DecisionSummary
+
+# V2 API - Temporal module
+from .temporal import (
+    # Weighting schemes
+    SMA,
+    EMA,
+    Linear,
+    PowerDecay,
+    Gaussian,
+    Custom,
+    # Tracking
+    ParameterTracker,
+    # Dynamics
+    Constant,
+    RandomWalk,
+    MeanReverting,
+    AR,
+    GARCH,
+    # Core classes
+    TemporalModel,
+    Projection,
+    PredictiveDistribution,
+)
+
+# V2 API - Discovery
+from .discovery import discover, DiscoveryResult
+
+# V2 API - Backtest
+from .backtest import Backtest, BacktestResult
+
+# V2 API - High-level facade
+from .api import temporal_model, backtest
+
+# V2 API - Decision with CIs
+from .decision import var_with_ci, cvar_with_ci, kelly_with_ci
+
 
 def evaluate(
     distribution: str | TimeEvolvingDistribution,  # type: ignore[type-arg]
@@ -320,4 +358,42 @@ __all__ = [
     "compare_distributions",
     # Utilities - Backtesting
     "rolling_var_backtest",
+    # =========================================================================
+    # V2 API - New in temporalpdf v2
+    # =========================================================================
+    # Core result types
+    "RiskMetric",
+    "DecisionSummary",
+    # Weighting schemes
+    "SMA",
+    "EMA",
+    "Linear",
+    "PowerDecay",
+    "Gaussian",
+    "Custom",
+    # Parameter tracking
+    "ParameterTracker",
+    # Dynamics models
+    "Constant",
+    "RandomWalk",
+    "MeanReverting",
+    "AR",
+    "GARCH",
+    # Temporal modeling
+    "TemporalModel",
+    "Projection",
+    "PredictiveDistribution",
+    # Discovery
+    "discover",
+    "DiscoveryResult",
+    # Backtesting
+    "Backtest",
+    "BacktestResult",
+    "backtest",
+    # High-level API
+    "temporal_model",
+    # Decision with confidence intervals
+    "var_with_ci",
+    "cvar_with_ci",
+    "kelly_with_ci",
 ]

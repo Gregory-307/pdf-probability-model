@@ -11,10 +11,12 @@ References:
     of Risk. Mathematical Finance, 9(3), 203-228.
 """
 
-from typing import Protocol
+from typing import Protocol, overload
 
 import numpy as np
 from numpy.typing import NDArray
+
+from ..core.result import RiskMetric
 
 
 class Distribution(Protocol):
@@ -179,3 +181,122 @@ def cvar(
 ) -> float:
     """Convenience function for CVaR."""
     return CVaR()(dist, params, alpha, t, n_samples, rng)
+
+
+# =============================================================================
+# V2 API - Functions returning RiskMetric with confidence intervals
+# =============================================================================
+
+
+def var_with_ci(
+    dist: Distribution,
+    params: object,
+    alpha: float = 0.05,
+    t: float = 0.0,
+    confidence_level: float = 0.90,
+    n_samples: int = 100000,
+    n_bootstrap: int = 1000,
+    rng: np.random.Generator | None = None,
+) -> RiskMetric:
+    """
+    Compute VaR with confidence interval via bootstrap.
+
+    Args:
+        dist: Distribution with sample method
+        params: Distribution parameters
+        alpha: Tail probability (default 0.05 for 95% VaR)
+        t: Time point
+        confidence_level: CI level (default 0.90 for 90% CI)
+        n_samples: Number of samples from distribution
+        n_bootstrap: Number of bootstrap iterations
+        rng: Random number generator
+
+    Returns:
+        RiskMetric with value and confidence_interval
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Sample from distribution
+    samples = dist.sample(n_samples, t, params, rng)
+
+    # Point estimate
+    var_val = -float(np.quantile(samples, alpha))
+
+    # Bootstrap CI
+    var_boots = []
+    for _ in range(n_bootstrap):
+        boot_idx = rng.choice(n_samples, n_samples, replace=True)
+        boot_samples = samples[boot_idx]
+        var_boots.append(-np.quantile(boot_samples, alpha))
+
+    ci_low = (1 - confidence_level) / 2
+    ci_high = 1 - ci_low
+
+    return RiskMetric(
+        value=var_val,
+        confidence_interval=(
+            float(np.quantile(var_boots, ci_low)),
+            float(np.quantile(var_boots, ci_high))
+        ),
+        standard_error=float(np.std(var_boots)),
+    )
+
+
+def cvar_with_ci(
+    dist: Distribution,
+    params: object,
+    alpha: float = 0.05,
+    t: float = 0.0,
+    confidence_level: float = 0.90,
+    n_samples: int = 100000,
+    n_bootstrap: int = 1000,
+    rng: np.random.Generator | None = None,
+) -> RiskMetric:
+    """
+    Compute CVaR with confidence interval via bootstrap.
+
+    Args:
+        dist: Distribution with sample method
+        params: Distribution parameters
+        alpha: Tail probability (default 0.05 for 95% CVaR)
+        t: Time point
+        confidence_level: CI level (default 0.90 for 90% CI)
+        n_samples: Number of samples from distribution
+        n_bootstrap: Number of bootstrap iterations
+        rng: Random number generator
+
+    Returns:
+        RiskMetric with value and confidence_interval
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Sample from distribution
+    samples = dist.sample(n_samples, t, params, rng)
+
+    # Point estimate
+    threshold = np.quantile(samples, alpha)
+    tail = samples[samples <= threshold]
+    cvar_val = -float(np.mean(tail)) if len(tail) > 0 else -threshold
+
+    # Bootstrap CI
+    cvar_boots = []
+    for _ in range(n_bootstrap):
+        boot_idx = rng.choice(n_samples, n_samples, replace=True)
+        boot_samples = samples[boot_idx]
+        threshold = np.quantile(boot_samples, alpha)
+        tail = boot_samples[boot_samples <= threshold]
+        cvar_boots.append(-np.mean(tail) if len(tail) > 0 else -threshold)
+
+    ci_low = (1 - confidence_level) / 2
+    ci_high = 1 - ci_low
+
+    return RiskMetric(
+        value=cvar_val,
+        confidence_interval=(
+            float(np.quantile(cvar_boots, ci_low)),
+            float(np.quantile(cvar_boots, ci_high))
+        ),
+        standard_error=float(np.std(cvar_boots)),
+    )

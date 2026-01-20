@@ -18,6 +18,8 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import NDArray
 
+from ..core.result import RiskMetric
+
 
 class Distribution(Protocol):
     """Protocol for distributions."""
@@ -196,3 +198,64 @@ def fractional_kelly(
     full_kelly = kelly_fraction(dist, params, t, risk_free_rate)
 
     return fraction * full_kelly
+
+
+# =============================================================================
+# V2 API - Functions returning RiskMetric with confidence intervals
+# =============================================================================
+
+
+def kelly_with_ci(
+    dist: Distribution,
+    params: object,
+    t: float = 0.0,
+    risk_free_rate: float = 0.0,
+    confidence_level: float = 0.90,
+    n_samples: int = 100000,
+    n_bootstrap: int = 1000,
+    rng: np.random.Generator | None = None,
+) -> RiskMetric:
+    """
+    Compute Kelly fraction with confidence interval via bootstrap.
+
+    Args:
+        dist: Distribution with sample method
+        params: Distribution parameters
+        t: Time point
+        risk_free_rate: Risk-free rate
+        confidence_level: CI level (default 0.90 for 90% CI)
+        n_samples: Number of samples from distribution
+        n_bootstrap: Number of bootstrap iterations
+        rng: Random number generator
+
+    Returns:
+        RiskMetric with value and confidence_interval
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Sample from distribution
+    samples = dist.sample(n_samples, t, params, rng) - risk_free_rate
+
+    # Point estimate: μ / σ²
+    kelly_val = float(np.mean(samples) / (np.var(samples) + 1e-10))
+
+    # Bootstrap CI
+    kelly_boots = []
+    for _ in range(n_bootstrap):
+        boot_idx = rng.choice(n_samples, n_samples, replace=True)
+        boot_samples = samples[boot_idx]
+        boot_kelly = np.mean(boot_samples) / (np.var(boot_samples) + 1e-10)
+        kelly_boots.append(boot_kelly)
+
+    ci_low = (1 - confidence_level) / 2
+    ci_high = 1 - ci_low
+
+    return RiskMetric(
+        value=kelly_val,
+        confidence_interval=(
+            float(np.quantile(kelly_boots, ci_low)),
+            float(np.quantile(kelly_boots, ci_high))
+        ),
+        standard_error=float(np.std(kelly_boots)),
+    )

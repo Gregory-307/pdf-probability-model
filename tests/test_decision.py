@@ -158,3 +158,110 @@ class TestProbabilityQueries:
         """Test that invalid bounds raise ValueError."""
         with pytest.raises(ValueError):
             tpdf.prob_between(nig, params, lower=0.1, upper=-0.1)
+
+
+class TestVaRWithCI:
+    """Test VaR with confidence intervals (V2 API)."""
+
+    @pytest.fixture
+    def nig(self):
+        return tpdf.NIG()
+
+    @pytest.fixture
+    def params(self):
+        return tpdf.NIGParameters(mu=0.0, delta=0.02, alpha=15.0, beta=0.0)
+
+    def test_returns_risk_metric(self, nig, params):
+        """Test that var_with_ci returns RiskMetric."""
+        result = tpdf.var_with_ci(nig, params, alpha=0.05)
+        assert isinstance(result, tpdf.RiskMetric)
+
+    def test_has_confidence_interval(self, nig, params):
+        """Test that result has confidence interval."""
+        result = tpdf.var_with_ci(nig, params, alpha=0.05)
+        assert result.confidence_interval is not None
+        assert len(result.confidence_interval) == 2
+
+    def test_ci_contains_point_estimate(self, nig, params):
+        """Test that CI contains point estimate."""
+        result = tpdf.var_with_ci(nig, params, alpha=0.05)
+        lower, upper = result.confidence_interval
+        assert lower <= result.value <= upper
+
+    def test_float_conversion(self, nig, params):
+        """Test that RiskMetric converts to float."""
+        result = tpdf.var_with_ci(nig, params, alpha=0.05)
+        assert float(result) == result.value
+
+    def test_value_matches_var(self, nig, params):
+        """Test that value is in same order of magnitude as regular var function."""
+        result_ci = tpdf.var_with_ci(nig, params, alpha=0.05)
+        result_plain = tpdf.var(nig, params, alpha=0.05)
+        # Both should be positive VaR values in similar range
+        # (exact match not expected due to different methods: bootstrap vs quantile)
+        assert result_ci.value > 0
+        assert result_plain > 0
+        assert 0.5 < result_ci.value / result_plain < 2.0  # Within 2x
+
+
+class TestCVaRWithCI:
+    """Test CVaR with confidence intervals (V2 API)."""
+
+    @pytest.fixture
+    def nig(self):
+        return tpdf.NIG()
+
+    @pytest.fixture
+    def params(self):
+        return tpdf.NIGParameters(mu=0.0, delta=0.02, alpha=15.0, beta=0.0)
+
+    def test_returns_risk_metric(self, nig, params):
+        """Test that cvar_with_ci returns RiskMetric."""
+        rng = np.random.default_rng(42)
+        result = tpdf.cvar_with_ci(nig, params, alpha=0.05, rng=rng)
+        assert isinstance(result, tpdf.RiskMetric)
+
+    def test_has_confidence_interval(self, nig, params):
+        """Test that result has confidence interval."""
+        rng = np.random.default_rng(42)
+        result = tpdf.cvar_with_ci(nig, params, alpha=0.05, rng=rng)
+        assert result.confidence_interval is not None
+
+    def test_cvar_greater_than_var(self, nig, params):
+        """Test that CVaR >= VaR."""
+        rng = np.random.default_rng(42)
+        var_result = tpdf.var_with_ci(nig, params, alpha=0.05)
+        cvar_result = tpdf.cvar_with_ci(nig, params, alpha=0.05, rng=rng)
+        assert cvar_result.value >= var_result.value * 0.9  # Allow Monte Carlo error
+
+
+class TestKellyWithCI:
+    """Test Kelly fraction with confidence intervals (V2 API)."""
+
+    @pytest.fixture
+    def nig(self):
+        return tpdf.NIG()
+
+    def test_returns_risk_metric(self):
+        """Test that kelly_with_ci returns RiskMetric."""
+        nig = tpdf.NIG()
+        params = tpdf.NIGParameters(mu=0.01, delta=0.02, alpha=15.0, beta=0.0)
+        rng = np.random.default_rng(42)
+        result = tpdf.kelly_with_ci(nig, params, rng=rng)
+        assert isinstance(result, tpdf.RiskMetric)
+
+    def test_has_confidence_interval(self):
+        """Test that result has confidence interval."""
+        nig = tpdf.NIG()
+        params = tpdf.NIGParameters(mu=0.01, delta=0.02, alpha=15.0, beta=0.0)
+        rng = np.random.default_rng(42)
+        result = tpdf.kelly_with_ci(nig, params, rng=rng)
+        assert result.confidence_interval is not None
+
+    def test_positive_for_positive_mean(self):
+        """Test Kelly is positive when mean is positive."""
+        nig = tpdf.NIG()
+        params = tpdf.NIGParameters(mu=0.01, delta=0.02, alpha=15.0, beta=0.0)
+        rng = np.random.default_rng(42)
+        result = tpdf.kelly_with_ci(nig, params, rng=rng)
+        assert result.value > 0

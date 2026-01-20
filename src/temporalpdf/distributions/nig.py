@@ -79,6 +79,38 @@ class NIGParameters:
                 f"|beta| must be less than alpha, got |{self.beta}| >= {self.alpha}"
             )
 
+    def with_mu(self, new_mu: float) -> "NIGParameters":
+        """Return new params with updated mu."""
+        return NIGParameters(
+            mu=new_mu, delta=self.delta, alpha=self.alpha, beta=self.beta,
+            mu_drift=self.mu_drift, delta_growth=self.delta_growth,
+            volatility_model=self.volatility_model
+        )
+
+    def with_delta(self, new_delta: float) -> "NIGParameters":
+        """Return new params with updated delta (scale)."""
+        return NIGParameters(
+            mu=self.mu, delta=new_delta, alpha=self.alpha, beta=self.beta,
+            mu_drift=self.mu_drift, delta_growth=self.delta_growth,
+            volatility_model=self.volatility_model
+        )
+
+    def with_alpha(self, new_alpha: float) -> "NIGParameters":
+        """Return new params with updated alpha (tail heaviness)."""
+        return NIGParameters(
+            mu=self.mu, delta=self.delta, alpha=new_alpha, beta=self.beta,
+            mu_drift=self.mu_drift, delta_growth=self.delta_growth,
+            volatility_model=self.volatility_model
+        )
+
+    def with_beta(self, new_beta: float) -> "NIGParameters":
+        """Return new params with updated beta (skewness)."""
+        return NIGParameters(
+            mu=self.mu, delta=self.delta, alpha=self.alpha, beta=new_beta,
+            mu_drift=self.mu_drift, delta_growth=self.delta_growth,
+            volatility_model=self.volatility_model
+        )
+
     def _delta_at_time(self, t: float) -> float:
         """Compute delta at time t using the configured volatility model."""
         if self.volatility_model is not None:

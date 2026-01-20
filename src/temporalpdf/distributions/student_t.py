@@ -133,3 +133,33 @@ class StudentTDistribution(TimeEvolvingDistribution[StudentTParameters]):
         mu_t = params.mu_0 + params.delta * t
         sigma_t = params.sigma_0 * (1 + params.beta * t)
         return student_t.ppf(p, df=params.nu, loc=mu_t, scale=sigma_t)
+
+    # V2 API alias
+    ppf = quantile
+
+    def sample(
+        self,
+        n: int,
+        t: float,
+        params: StudentTParameters,
+        rng: np.random.Generator | None = None,
+    ) -> NDArray[np.float64]:
+        """
+        Draw n samples from the Student's t distribution.
+
+        Args:
+            n: Number of samples
+            t: Time point
+            params: Distribution parameters
+            rng: Random number generator (optional)
+
+        Returns:
+            Array of n samples
+        """
+        mu_t = params.mu_0 + params.delta * t
+        sigma_t = params.sigma_0 * (1 + params.beta * t)
+        if rng is None:
+            rng = np.random.default_rng()
+        # Sample from standard t and then scale/shift
+        samples = rng.standard_t(df=params.nu, size=n)
+        return mu_t + sigma_t * samples

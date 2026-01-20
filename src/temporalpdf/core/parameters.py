@@ -71,6 +71,14 @@ class NormalParameters(DistributionParameters):
         if self.sigma_0 <= 0:
             raise ValueError("sigma_0 must be positive")
 
+    def with_mu_0(self, new_mu_0: float) -> "NormalParameters":
+        """Return new params with updated mu_0."""
+        return NormalParameters(mu_0=new_mu_0, sigma_0=self.sigma_0, delta=self.delta, beta=self.beta)
+
+    def with_sigma_0(self, new_sigma_0: float) -> "NormalParameters":
+        """Return new params with updated sigma_0."""
+        return NormalParameters(mu_0=self.mu_0, sigma_0=new_sigma_0, delta=self.delta, beta=self.beta)
+
 
 @dataclass(frozen=True)
 class StudentTParameters(DistributionParameters):
@@ -101,6 +109,18 @@ class StudentTParameters(DistributionParameters):
         if self.nu <= 0:
             raise ValueError("nu (degrees of freedom) must be positive")
 
+    def with_mu_0(self, new_mu_0: float) -> "StudentTParameters":
+        """Return new params with updated mu_0."""
+        return StudentTParameters(mu_0=new_mu_0, sigma_0=self.sigma_0, nu=self.nu, delta=self.delta, beta=self.beta)
+
+    def with_sigma_0(self, new_sigma_0: float) -> "StudentTParameters":
+        """Return new params with updated sigma_0."""
+        return StudentTParameters(mu_0=self.mu_0, sigma_0=new_sigma_0, nu=self.nu, delta=self.delta, beta=self.beta)
+
+    def with_nu(self, new_nu: float) -> "StudentTParameters":
+        """Return new params with updated nu."""
+        return StudentTParameters(mu_0=self.mu_0, sigma_0=self.sigma_0, nu=new_nu, delta=self.delta, beta=self.beta)
+
 
 @dataclass(frozen=True)
 class SkewNormalParameters(DistributionParameters):
@@ -111,9 +131,9 @@ class SkewNormalParameters(DistributionParameters):
     asymmetry parameter, allowing it to model data with skewed distributions.
 
     Attributes:
-        mu_0: Initial location parameter
-        sigma_0: Initial scale parameter, must be positive
-        alpha: Skewness parameter. alpha=0 gives Normal distribution.
+        mu_0: Initial location parameter (called xi in scipy)
+        sigma_0: Initial scale parameter (called omega in scipy), must be positive
+        alpha: Skewness parameter (called a in scipy). alpha=0 gives Normal distribution.
                Positive values skew right, negative values skew left.
         delta: Mean drift rate per unit time
         beta: Volatility growth rate (multiplicative factor)
@@ -128,3 +148,15 @@ class SkewNormalParameters(DistributionParameters):
     def __post_init__(self) -> None:
         if self.sigma_0 <= 0:
             raise ValueError("sigma_0 must be positive")
+
+    def with_mu_0(self, new_mu_0: float) -> "SkewNormalParameters":
+        """Return new params with updated mu_0."""
+        return SkewNormalParameters(mu_0=new_mu_0, sigma_0=self.sigma_0, alpha=self.alpha, delta=self.delta, beta=self.beta)
+
+    def with_sigma_0(self, new_sigma_0: float) -> "SkewNormalParameters":
+        """Return new params with updated sigma_0."""
+        return SkewNormalParameters(mu_0=self.mu_0, sigma_0=new_sigma_0, alpha=self.alpha, delta=self.delta, beta=self.beta)
+
+    def with_alpha(self, new_alpha: float) -> "SkewNormalParameters":
+        """Return new params with updated alpha (skewness)."""
+        return SkewNormalParameters(mu_0=self.mu_0, sigma_0=self.sigma_0, alpha=new_alpha, delta=self.delta, beta=self.beta)
