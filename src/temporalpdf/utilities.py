@@ -475,7 +475,12 @@ def barrier_prob_normal(
     # Correction for positive drift (reflection principle)
     if mu > 1e-10 and sigma > 1e-10:
         d2 = (barrier + drift) / vol
-        p += np.exp(2 * mu * barrier / (sigma**2)) * stats.norm.cdf(-d2)
+        # Guard against overflow in exponential term
+        exp_arg = 2 * mu * barrier / (sigma**2)
+        if exp_arg < 700:  # exp(700) is close to float max
+            p += np.exp(exp_arg) * stats.norm.cdf(-d2)
+        # If exp_arg >= 700, the correction term is essentially 0 anyway
+        # because cdf(-d2) will be tiny for such cases
 
     return float(np.clip(p, 0, 1))
 

@@ -225,7 +225,7 @@ class DistributionalRegressor:
             ]
         elif self.distribution == "normal":
             return [
-                NormalParameters(mu=p[0], sigma=p[1])
+                NormalParameters(mu_0=p[0], sigma_0=p[1])
                 for p in params_array
             ]
         elif self.distribution == "nig":
