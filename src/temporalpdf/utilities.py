@@ -743,3 +743,161 @@ def barrier_prob_qmc(
     max_cumsum = np.max(cumsum, axis=1)
 
     return float(np.mean(max_cumsum >= barrier))
+
+
+# =============================================================================
+# Conformal Prediction - Distribution-Free Calibrated Intervals
+# =============================================================================
+
+class ConformalPredictor:
+    """
+    Conformal prediction wrapper for calibrated prediction intervals.
+
+    Wraps any distribution predictor to produce intervals with guaranteed
+    coverage, regardless of the underlying distribution assumptions.
+
+    Key insight: Even if your predicted distribution is mis-specified,
+    conformal prediction adjusts the intervals to achieve correct coverage.
+
+    Example:
+        >>> import temporalpdf as tpdf
+        >>>
+        >>> # Fit a model that predicts distribution parameters
+        >>> model = tpdf.DistributionalRegressor(distribution="student_t")
+        >>> model.fit(X_train, y_train)
+        >>>
+        >>> # Wrap with conformal prediction for calibrated intervals
+        >>> conformal = tpdf.ConformalPredictor(model, X_cal, y_cal)
+        >>>
+        >>> # Get 90% prediction intervals (guaranteed coverage)
+        >>> lower, upper = conformal.predict_interval(X_test, alpha=0.1)
+
+    Args:
+        predictor: Any object with predict() method returning distribution params
+        X_cal: Calibration features (n_cal, n_features)
+        y_cal: Calibration targets (n_cal,)
+        distribution: Distribution type for interval calculation
+
+    References:
+        Vovk et al. (2005). Algorithmic Learning in a Random World.
+        Romano et al. (2019). Conformalized Quantile Regression.
+    """
+
+    def __init__(
+        self,
+        predictor,
+        X_cal: np.ndarray,
+        y_cal: np.ndarray,
+        distribution: str = "student_t",
+    ):
+        self.predictor = predictor
+        self.distribution = distribution
+
+        # Compute nonconformity scores on calibration set
+        self._calibrate(X_cal, y_cal)
+
+    def _calibrate(self, X_cal: np.ndarray, y_cal: np.ndarray) -> None:
+        """Compute nonconformity scores on calibration data."""
+        # Get predicted parameters
+        params = self.predictor.predict(X_cal)
+
+        # Compute residuals scaled by predicted uncertainty
+        if self.distribution == "normal":
+            mu = params[:, 0]
+            sigma = params[:, 1]
+            # Nonconformity = |y - mu| / sigma
+            self.scores = np.abs(y_cal - mu) / np.maximum(sigma, 1e-8)
+
+        elif self.distribution == "student_t":
+            mu = params[:, 0]
+            sigma = params[:, 1]
+            # Use same scoring as normal (scaled residuals)
+            self.scores = np.abs(y_cal - mu) / np.maximum(sigma, 1e-8)
+
+        elif self.distribution == "nig":
+            mu = params[:, 0]
+            delta = params[:, 1]
+            self.scores = np.abs(y_cal - mu) / np.maximum(delta, 1e-8)
+
+        else:
+            raise ValueError(f"Unknown distribution: {self.distribution}")
+
+        # Sort scores for quantile computation
+        self.scores = np.sort(self.scores)
+
+    def predict_interval(
+        self,
+        X: np.ndarray,
+        alpha: float = 0.1,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Predict calibrated intervals with (1-alpha) coverage guarantee.
+
+        Args:
+            X: Features (n_samples, n_features)
+            alpha: Miscoverage rate (default 0.1 for 90% intervals)
+
+        Returns:
+            (lower, upper) bounds with shape (n_samples,)
+        """
+        n_cal = len(self.scores)
+
+        # Quantile with finite-sample correction
+        # q = ceil((n+1)(1-alpha)) / n
+        q_idx = int(np.ceil((n_cal + 1) * (1 - alpha))) - 1
+        q_idx = min(q_idx, n_cal - 1)  # Clamp to valid range
+        q = self.scores[q_idx]
+
+        # Get predicted parameters
+        params = self.predictor.predict(X)
+
+        if self.distribution == "normal":
+            mu = params[:, 0]
+            sigma = params[:, 1]
+        elif self.distribution == "student_t":
+            mu = params[:, 0]
+            sigma = params[:, 1]
+        elif self.distribution == "nig":
+            mu = params[:, 0]
+            sigma = params[:, 1]  # Using delta as scale
+        else:
+            raise ValueError(f"Unknown distribution: {self.distribution}")
+
+        # Interval: mu +/- q * sigma
+        lower = mu - q * sigma
+        upper = mu + q * sigma
+
+        return lower, upper
+
+    def coverage(self, X_test: np.ndarray, y_test: np.ndarray, alpha: float = 0.1) -> float:
+        """
+        Compute empirical coverage on test data.
+
+        Args:
+            X_test: Test features
+            y_test: Test targets
+            alpha: Miscoverage rate
+
+        Returns:
+            Fraction of test points within predicted intervals
+        """
+        lower, upper = self.predict_interval(X_test, alpha=alpha)
+        in_interval = (y_test >= lower) & (y_test <= upper)
+        return float(np.mean(in_interval))
+
+    def interval_width(self, X: np.ndarray, alpha: float = 0.1) -> np.ndarray:
+        """
+        Compute width of prediction intervals.
+
+        Useful for evaluating interval sharpness (narrower = better,
+        given correct coverage).
+
+        Args:
+            X: Features
+            alpha: Miscoverage rate
+
+        Returns:
+            Array of interval widths
+        """
+        lower, upper = self.predict_interval(X, alpha=alpha)
+        return upper - lower

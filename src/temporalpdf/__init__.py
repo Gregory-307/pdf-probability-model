@@ -168,6 +168,8 @@ from .utilities import (
     barrier_prob_mc,
     barrier_prob_importance_sampling,
     barrier_prob_qmc,
+    # Conformal prediction
+    ConformalPredictor,
 )
 
 # V2 API - Core result types
@@ -207,6 +209,22 @@ from .api import temporal_model, backtest
 
 # ML module - distributional regression with proper scoring rules
 from .ml import DistributionalRegressor
+
+# Feature extraction for distributional regression
+from .features import (
+    hill_estimator,
+    jarque_bera_stat,
+    realized_moments,
+    volatility_clustering,
+    garch_proxy,
+    vol_regime_indicator,
+    extreme_event_frequency,
+    tail_asymmetry,
+    max_drawdown,
+    calibration_features,
+    extract_calibration_features,
+    get_feature_names,
+)
 
 # V2 API - Decision with CIs
 from .decision import var_with_ci, cvar_with_ci, kelly_with_ci
@@ -375,6 +393,8 @@ __all__ = [
     "barrier_prob_mc",
     "barrier_prob_importance_sampling",
     "barrier_prob_qmc",
+    # Conformal prediction
+    "ConformalPredictor",
     # =========================================================================
     # V2 API - New in temporalpdf v2
     # =========================================================================
@@ -415,4 +435,17 @@ __all__ = [
     "kelly_with_ci",
     # ML module
     "DistributionalRegressor",
+    # Feature extraction
+    "hill_estimator",
+    "jarque_bera_stat",
+    "realized_moments",
+    "volatility_clustering",
+    "garch_proxy",
+    "vol_regime_indicator",
+    "extreme_event_frequency",
+    "tail_asymmetry",
+    "max_drawdown",
+    "calibration_features",
+    "extract_calibration_features",
+    "get_feature_names",
 ]

@@ -29,6 +29,23 @@ Build a PyTorch wrapper that:
 
 ---
 
+## IMPLEMENTATION STATUS
+
+| Priority | Description | Status | Files |
+|----------|-------------|--------|-------|
+| 1 | DistributionalRegressor (CRPS Training) | **DONE** | `ml.py` |
+| 2 | Analytical Barrier Approximations | **DONE** | `utilities.py` |
+| 3 | Importance Sampling | **DONE** | `utilities.py` |
+| 4 | Quasi-Monte Carlo | **DONE** | `utilities.py` |
+| 5 | Calibration Features | **DONE** | `features.py` |
+| 6 | Conformal Prediction | **DONE** | `utilities.py` |
+| 7 | Temporal Dynamics | PLANNED | - |
+| 8 | End-to-End Training | RESEARCH | - |
+
+**Last Updated**: 2026-01-21
+
+---
+
 ## PRIORITY 1: DistributionalRegressor (CRPS Training)
 
 ### Goal
