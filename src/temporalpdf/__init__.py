@@ -161,6 +161,13 @@ from .utilities import (
     compare_distributions,
     # Backtesting
     rolling_var_backtest,
+    # Barrier probability
+    barrier_prob_normal,
+    barrier_prob_student_t,
+    barrier_prob_nig,
+    barrier_prob_mc,
+    barrier_prob_importance_sampling,
+    barrier_prob_qmc,
 )
 
 # V2 API - Core result types
@@ -361,6 +368,13 @@ __all__ = [
     "compare_distributions",
     # Utilities - Backtesting
     "rolling_var_backtest",
+    # Utilities - Barrier probability
+    "barrier_prob_normal",
+    "barrier_prob_student_t",
+    "barrier_prob_nig",
+    "barrier_prob_mc",
+    "barrier_prob_importance_sampling",
+    "barrier_prob_qmc",
     # =========================================================================
     # V2 API - New in temporalpdf v2
     # =========================================================================

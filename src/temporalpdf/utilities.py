@@ -429,3 +429,312 @@ def rolling_var_backtest(
         "kupiec_pvalue": kupiec_pvalue,
         "status": status,
     }
+
+
+# =============================================================================
+# BARRIER PROBABILITY UTILITIES
+# =============================================================================
+
+def barrier_prob_normal(
+    mu: float,
+    sigma: float,
+    horizon: int,
+    barrier: float,
+) -> float:
+    """
+    Analytical barrier probability for random walk with Normal increments.
+
+    Uses reflection principle - exact for Brownian motion with drift.
+    Computes P(max_{t=1..T} S_t >= barrier) where S_t is cumulative sum.
+
+    Args:
+        mu: Mean of daily returns
+        sigma: Std dev of daily returns
+        horizon: Number of time steps
+        barrier: Cumulative return threshold (e.g., 0.05 for 5%)
+
+    Returns:
+        P(max cumulative sum >= barrier)
+
+    Example:
+        >>> p = barrier_prob_normal(mu=0.001, sigma=0.02, horizon=10, barrier=0.05)
+        >>> print(f"P(hit 5% in 10 days): {p:.1%}")
+    """
+    drift = mu * horizon
+    vol = sigma * np.sqrt(horizon)
+
+    if vol < 1e-10:
+        return 1.0 if drift >= barrier else 0.0
+
+    # Standard first passage approximation
+    d1 = (barrier - drift) / vol
+
+    # Base probability
+    p = stats.norm.cdf(-d1)
+
+    # Correction for positive drift (reflection principle)
+    if mu > 1e-10 and sigma > 1e-10:
+        d2 = (barrier + drift) / vol
+        p += np.exp(2 * mu * barrier / (sigma**2)) * stats.norm.cdf(-d2)
+
+    return float(np.clip(p, 0, 1))
+
+
+def barrier_prob_student_t(
+    mu: float,
+    sigma: float,
+    nu: float,
+    horizon: int,
+    barrier: float,
+) -> float:
+    """
+    Approximate barrier probability for Student-t distribution.
+
+    Uses Normal analytical formula with inflated volatility to account
+    for fat tails. The inflation factor is sqrt(nu/(nu-2)) which is the
+    ratio of Student-t std dev to scale parameter.
+
+    Args:
+        mu: Location parameter
+        sigma: Scale parameter
+        nu: Degrees of freedom (tail heaviness). Lower = fatter tails.
+        horizon: Number of time steps
+        barrier: Cumulative return threshold
+
+    Returns:
+        Approximate P(max cumulative sum >= barrier)
+
+    Example:
+        >>> p = barrier_prob_student_t(mu=0.001, sigma=0.02, nu=5, horizon=10, barrier=0.05)
+    """
+    # Inflate sigma to account for fat tails
+    if nu > 2:
+        # Student-t variance = sigma^2 * nu/(nu-2)
+        tail_factor = np.sqrt(nu / (nu - 2))
+    else:
+        # Infinite variance case - use conservative estimate
+        tail_factor = 3.0
+
+    effective_sigma = sigma * tail_factor
+    return barrier_prob_normal(mu, effective_sigma, horizon, barrier)
+
+
+def barrier_prob_nig(
+    mu: float,
+    delta: float,
+    alpha: float,
+    beta: float,
+    horizon: int,
+    barrier: float,
+) -> float:
+    """
+    Approximate barrier probability for NIG distribution.
+
+    NIG has semi-heavy tails. Uses adjusted Normal approximation based on
+    NIG variance and kurtosis.
+
+    Args:
+        mu: Location parameter
+        delta: Scale parameter
+        alpha: Tail heaviness (larger = lighter tails)
+        beta: Skewness parameter
+        horizon: Number of time steps
+        barrier: Cumulative return threshold
+
+    Returns:
+        Approximate P(max cumulative sum >= barrier)
+    """
+    # NIG variance = delta / gamma^3 where gamma = sqrt(alpha^2 - beta^2)
+    gamma = np.sqrt(alpha**2 - beta**2 + 1e-10)
+    nig_variance = delta / (gamma**3)
+    effective_sigma = np.sqrt(nig_variance)
+
+    # NIG excess kurtosis = 3 * (1 + 4*beta^2/gamma^2) / (delta * gamma)
+    # Use this to estimate effective degrees of freedom
+    nig_kurtosis = 3 * (1 + 4 * beta**2 / gamma**2) / (delta * gamma + 1e-10)
+    # Map kurtosis to approximate nu (nu=4 has kurtosis=inf, nu=5 has kurtosis=6)
+    effective_nu = max(4.0, 6.0 / (nig_kurtosis + 1e-10) + 4.0)
+
+    return barrier_prob_student_t(mu, effective_sigma, effective_nu, horizon, barrier)
+
+
+def barrier_prob_mc(
+    params: Union[StudentTParameters, NormalParameters, NIGParameters],
+    horizon: int,
+    barrier: float,
+    n_sims: int = 10000,
+    distribution: Literal["normal", "student_t", "nig"] = "student_t",
+) -> float:
+    """
+    Monte Carlo barrier probability estimation.
+
+    Standard simulation approach - sample paths and count barrier hits.
+
+    Args:
+        params: Distribution parameters
+        horizon: Number of time steps
+        barrier: Cumulative return threshold
+        n_sims: Number of simulation paths
+        distribution: Distribution type
+
+    Returns:
+        Estimated P(max cumulative sum >= barrier)
+    """
+    if distribution == "normal":
+        mu = params.mu_0 if hasattr(params, 'mu_0') else params.mu
+        sigma = params.sigma_0 if hasattr(params, 'sigma_0') else params.sigma
+        samples = np.random.normal(mu, sigma, size=(n_sims, horizon))
+
+    elif distribution == "student_t":
+        mu = params.mu_0
+        sigma = params.sigma_0
+        nu = params.nu
+        samples = mu + sigma * np.random.standard_t(nu, size=(n_sims, horizon))
+
+    elif distribution == "nig":
+        # NIG sampling via inverse Gaussian mixture
+        gamma = np.sqrt(params.alpha**2 - params.beta**2)
+        # Inverse Gaussian samples
+        ig_samples = stats.invgauss.rvs(
+            mu=params.delta / gamma,
+            scale=params.delta**2,
+            size=(n_sims, horizon)
+        )
+        normal_samples = np.random.randn(n_sims, horizon)
+        samples = params.mu + params.beta * ig_samples + np.sqrt(ig_samples) * normal_samples
+
+    else:
+        raise ValueError(f"Unknown distribution: {distribution}")
+
+    # Compute cumulative sums and check barrier
+    cumsum = np.cumsum(samples, axis=1)
+    max_cumsum = np.max(cumsum, axis=1)
+
+    return float(np.mean(max_cumsum >= barrier))
+
+
+def barrier_prob_importance_sampling(
+    params: Union[StudentTParameters, NormalParameters],
+    horizon: int,
+    barrier: float,
+    n_sims: int = 10000,
+    distribution: Literal["normal", "student_t"] = "normal",
+) -> float:
+    """
+    Barrier probability with importance sampling for rare events.
+
+    Tilts the distribution toward barrier-hitting paths, then corrects
+    with likelihood ratios. Much lower variance for rare events.
+
+    NOTE: The exponential tilting approach is exact for Normal distribution.
+    For Student-t, the likelihood ratio is approximate and results may be
+    biased. Use barrier_prob_qmc() for Student-t distributions.
+
+    Args:
+        params: Distribution parameters
+        horizon: Number of time steps
+        barrier: Cumulative return threshold
+        n_sims: Number of simulation paths
+        distribution: Distribution type. "normal" recommended (exact IS).
+                      "student_t" uses approximate IS (may be biased).
+
+    Returns:
+        Importance-weighted barrier probability estimate
+
+    Example:
+        >>> # For Normal distribution, IS gives lower variance
+        >>> params = tpdf.NormalParameters(mu_0=0.001, sigma_0=0.02)
+        >>> p_is = barrier_prob_importance_sampling(params, horizon=10, barrier=0.10)
+    """
+    if distribution == "normal":
+        mu = params.mu_0 if hasattr(params, 'mu_0') else params.mu
+        sigma = params.sigma_0 if hasattr(params, 'sigma_0') else params.sigma
+        nu = None
+    else:  # student_t
+        mu = params.mu_0
+        sigma = params.sigma_0
+        nu = params.nu
+
+    # Optimal drift shift toward barrier (exponential tilting)
+    optimal_shift = barrier / (horizon * sigma**2)
+    tilted_mu = mu + optimal_shift * sigma**2
+
+    # Sample from tilted distribution
+    if distribution == "normal":
+        samples = np.random.normal(tilted_mu, sigma, size=(n_sims, horizon))
+    else:
+        samples = tilted_mu + sigma * np.random.standard_t(nu, size=(n_sims, horizon))
+
+    # Compute paths
+    cumsum = np.cumsum(samples, axis=1)
+    max_cumsum = np.max(cumsum, axis=1)
+    hits = max_cumsum >= barrier
+
+    # Likelihood ratio correction
+    # For normal: log(p_orig / p_tilted) = -shift * sum(X) + 0.5 * shift^2 * sigma^2 * T + shift * mu * T
+    path_sums = np.sum(samples, axis=1)
+    log_ratio = (
+        -optimal_shift * path_sums +
+        optimal_shift * mu * horizon +
+        0.5 * optimal_shift**2 * sigma**2 * horizon
+    )
+    weights = np.exp(log_ratio)
+
+    # Self-normalized importance sampling estimator
+    return float(np.sum(hits * weights) / np.sum(weights))
+
+
+def barrier_prob_qmc(
+    params: Union[StudentTParameters, NormalParameters],
+    horizon: int,
+    barrier: float,
+    n_sims: int = 1024,
+    distribution: Literal["normal", "student_t"] = "student_t",
+) -> float:
+    """
+    Barrier probability using Quasi-Monte Carlo (Sobol sequences).
+
+    QMC fills the sample space more uniformly than pseudo-random,
+    giving lower variance with the same number of samples.
+
+    Args:
+        params: Distribution parameters
+        horizon: Number of time steps
+        barrier: Cumulative return threshold
+        n_sims: Number of paths (should be power of 2 for Sobol)
+        distribution: Distribution type
+
+    Returns:
+        QMC estimate of P(max cumulative sum >= barrier)
+
+    Note:
+        n_sims should be a power of 2 for optimal Sobol sequence properties.
+    """
+    from scipy.stats import qmc
+
+    # Generate Sobol sequence
+    sampler = qmc.Sobol(d=horizon, scramble=True)
+    uniform_samples = sampler.random(n=n_sims)  # (n_sims, horizon) in [0,1]
+
+    # Transform to distribution
+    if distribution == "normal":
+        mu = params.mu_0 if hasattr(params, 'mu_0') else params.mu
+        sigma = params.sigma_0 if hasattr(params, 'sigma_0') else params.sigma
+        z = stats.norm.ppf(uniform_samples)
+        samples = mu + sigma * z
+
+    elif distribution == "student_t":
+        mu = params.mu_0
+        sigma = params.sigma_0
+        nu = params.nu
+        z = stats.t.ppf(uniform_samples, df=nu)
+        samples = mu + sigma * z
+
+    else:
+        raise ValueError(f"QMC not implemented for {distribution}")
+
+    # Compute paths
+    cumsum = np.cumsum(samples, axis=1)
+    max_cumsum = np.max(cumsum, axis=1)
+
+    return float(np.mean(max_cumsum >= barrier))
