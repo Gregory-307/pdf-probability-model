@@ -198,6 +198,9 @@ from .backtest import Backtest, BacktestResult
 # V2 API - High-level facade
 from .api import temporal_model, backtest
 
+# ML module - distributional regression with proper scoring rules
+from .ml import DistributionalRegressor
+
 # V2 API - Decision with CIs
 from .decision import var_with_ci, cvar_with_ci, kelly_with_ci
 
@@ -396,4 +399,6 @@ __all__ = [
     "var_with_ci",
     "cvar_with_ci",
     "kelly_with_ci",
+    # ML module
+    "DistributionalRegressor",
 ]
