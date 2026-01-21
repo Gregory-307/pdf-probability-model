@@ -170,6 +170,9 @@ from .utilities import (
     barrier_prob_qmc,
     # Conformal prediction
     ConformalPredictor,
+    # Temporal dynamics
+    barrier_prob_temporal,
+    compare_static_vs_temporal,
 )
 
 # V2 API - Core result types
@@ -395,6 +398,9 @@ __all__ = [
     "barrier_prob_qmc",
     # Conformal prediction
     "ConformalPredictor",
+    # Temporal dynamics
+    "barrier_prob_temporal",
+    "compare_static_vs_temporal",
     # =========================================================================
     # V2 API - New in temporalpdf v2
     # =========================================================================

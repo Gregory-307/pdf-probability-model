@@ -39,7 +39,7 @@ Build a PyTorch wrapper that:
 | 4 | Quasi-Monte Carlo | **DONE** | `utilities.py` |
 | 5 | Calibration Features | **DONE** | `features.py` |
 | 6 | Conformal Prediction | **DONE** | `utilities.py` |
-| 7 | Temporal Dynamics | PLANNED | - |
+| 7 | Temporal Dynamics | **DONE** | `utilities.py` |
 | 8 | End-to-End Training | RESEARCH | - |
 
 **Last Updated**: 2026-01-21

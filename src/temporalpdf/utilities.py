@@ -901,3 +901,190 @@ class ConformalPredictor:
         """
         lower, upper = self.predict_interval(X, alpha=alpha)
         return upper - lower
+
+
+# =============================================================================
+# Temporal Dynamics Integration - Time-varying parameter simulation
+# =============================================================================
+
+def barrier_prob_temporal(
+    historical_data: np.ndarray,
+    horizon: int,
+    barrier: float,
+    distribution: str = "student_t",
+    n_sims: int = 1000,
+    window: int = 60,
+    dynamics: dict | None = None,
+) -> float:
+    """
+    Barrier probability with time-varying parameters via temporal dynamics.
+
+    Unlike static barrier probability, this simulates with parameters that
+    evolve over time (e.g., GARCH volatility dynamics).
+
+    Key difference from barrier_prob_mc:
+    - barrier_prob_mc: Fixed σ for all days
+    - barrier_prob_temporal: σ evolves via dynamics model (GARCH, mean-reverting, etc.)
+
+    Args:
+        historical_data: Historical observations for fitting temporal model
+        horizon: Number of steps to simulate forward
+        barrier: Cumulative threshold
+        distribution: "student_t", "normal", or "nig"
+        n_sims: Number of simulation paths
+        window: Rolling window for parameter estimation
+        dynamics: Dict mapping parameter names to dynamics models.
+                  Default uses GARCH(1,1) for sigma.
+
+    Returns:
+        Estimated P(max cumulative sum >= barrier)
+
+    Example:
+        >>> import temporalpdf as tpdf
+        >>>
+        >>> # Use historical returns to project forward with GARCH dynamics
+        >>> p = tpdf.barrier_prob_temporal(
+        ...     historical_data=returns[-120:],
+        ...     horizon=20,
+        ...     barrier=0.05,
+        ...     distribution="student_t",
+        ...     dynamics={"sigma_0": tpdf.GARCH(1, 1)},
+        ... )
+
+    Note:
+        Requires sufficient historical data (at least window + 10 observations).
+    """
+    from . import TemporalModel, ParameterTracker, GARCH
+
+    # Validate inputs
+    if len(historical_data) < window + 10:
+        raise ValueError(
+            f"Need at least {window + 10} observations, got {len(historical_data)}"
+        )
+
+    # Default dynamics: GARCH for volatility
+    if dynamics is None:
+        if distribution == "normal":
+            dynamics = {"sigma_0": GARCH(1, 1)}
+        elif distribution == "student_t":
+            dynamics = {"sigma_0": GARCH(1, 1)}
+        elif distribution == "nig":
+            dynamics = {"delta": GARCH(1, 1)}
+        else:
+            raise ValueError(f"Unknown distribution: {distribution}")
+
+    # Create and fit temporal model
+    tracker = ParameterTracker(distribution, window=window)
+    model = TemporalModel(
+        distribution=distribution,
+        tracking=tracker,
+        dynamics=dynamics,
+    )
+    model.fit(historical_data)
+
+    # Project parameters forward
+    projection = model.project(horizon=horizon, n_paths=n_sims)
+
+    # Simulate paths with time-varying parameters
+    hits = 0
+    for path_idx in range(n_sims):
+        cumsum = 0.0
+        max_cumsum = 0.0
+
+        for t in range(horizon):
+            # Get time-varying parameters
+            if distribution == "student_t":
+                mu_t = float(projection.param_paths.get("mu_0", np.zeros((n_sims, horizon)))[path_idx, t])
+                sigma_t = float(projection.param_paths["sigma_0"][path_idx, t])
+                nu_t = float(projection.param_paths.get("nu", np.full((n_sims, horizon), 5.0))[path_idx, t])
+                day_return = mu_t + sigma_t * np.random.standard_t(nu_t)
+
+            elif distribution == "normal":
+                mu_t = float(projection.param_paths.get("mu_0", np.zeros((n_sims, horizon)))[path_idx, t])
+                sigma_t = float(projection.param_paths["sigma_0"][path_idx, t])
+                day_return = mu_t + sigma_t * np.random.randn()
+
+            elif distribution == "nig":
+                mu_t = float(projection.param_paths.get("mu", np.zeros((n_sims, horizon)))[path_idx, t])
+                delta_t = float(projection.param_paths["delta"][path_idx, t])
+                alpha_t = float(projection.param_paths.get("alpha", np.full((n_sims, horizon), 15.0))[path_idx, t])
+                beta_t = float(projection.param_paths.get("beta", np.zeros((n_sims, horizon)))[path_idx, t])
+                gamma_t = np.sqrt(alpha_t**2 - beta_t**2)
+
+                # NIG sampling via inverse Gaussian mixture
+                ig_mean = delta_t / gamma_t
+                ig_shape = delta_t**2
+                z = np.random.wald(ig_mean, ig_shape)
+                day_return = mu_t + beta_t * z + np.sqrt(z) * np.random.randn()
+
+            else:
+                raise ValueError(f"Unknown distribution: {distribution}")
+
+            cumsum += day_return
+            max_cumsum = max(max_cumsum, cumsum)
+
+        if max_cumsum >= barrier:
+            hits += 1
+
+    return hits / n_sims
+
+
+def compare_static_vs_temporal(
+    historical_data: np.ndarray,
+    horizon: int,
+    barrier: float,
+    distribution: str = "student_t",
+    n_sims: int = 5000,
+) -> dict:
+    """
+    Compare barrier probability: static parameters vs temporal dynamics.
+
+    Useful for understanding whether time-varying volatility matters
+    for your specific forecast horizon and barrier level.
+
+    Args:
+        historical_data: Historical observations
+        horizon: Forecast horizon
+        barrier: Barrier threshold
+        distribution: Distribution type
+        n_sims: Simulations per method
+
+    Returns:
+        Dict with 'static', 'temporal', and 'difference' probabilities
+
+    Example:
+        >>> comparison = tpdf.compare_static_vs_temporal(
+        ...     returns[-120:], horizon=20, barrier=0.05
+        ... )
+        >>> print(f"Static: {comparison['static']:.1%}")
+        >>> print(f"Temporal: {comparison['temporal']:.1%}")
+    """
+    from . import fit
+
+    # Fit static parameters
+    static_params = fit(historical_data[-60:], distribution=distribution)
+
+    # Static barrier probability
+    p_static = barrier_prob_mc(
+        params=static_params,
+        horizon=horizon,
+        barrier=barrier,
+        n_sims=n_sims,
+        distribution=distribution,
+    )
+
+    # Temporal barrier probability
+    p_temporal = barrier_prob_temporal(
+        historical_data=historical_data,
+        horizon=horizon,
+        barrier=barrier,
+        distribution=distribution,
+        n_sims=n_sims,
+    )
+
+    return {
+        "static": p_static,
+        "temporal": p_temporal,
+        "difference": p_temporal - p_static,
+        "relative_diff": (p_temporal - p_static) / max(p_static, 1e-6),
+    }
