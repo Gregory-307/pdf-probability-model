@@ -40,7 +40,7 @@ Build a PyTorch wrapper that:
 | 5 | Calibration Features | **DONE** | `features.py` |
 | 6 | Conformal Prediction | **DONE** | `utilities.py` |
 | 7 | Temporal Dynamics | **DONE** | `utilities.py` |
-| 8 | End-to-End Training | RESEARCH | - |
+| 8 | End-to-End Training | **DONE** | `ml.py` |
 
 **Last Updated**: 2026-01-21
 

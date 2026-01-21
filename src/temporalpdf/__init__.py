@@ -211,7 +211,7 @@ from .backtest import Backtest, BacktestResult
 from .api import temporal_model, backtest
 
 # ML module - distributional regression with proper scoring rules
-from .ml import DistributionalRegressor
+from .ml import DistributionalRegressor, BarrierModel, barrier_prob_analytical_student_t
 
 # Feature extraction for distributional regression
 from .features import (
@@ -441,6 +441,8 @@ __all__ = [
     "kelly_with_ci",
     # ML module
     "DistributionalRegressor",
+    "BarrierModel",
+    "barrier_prob_analytical_student_t",
     # Feature extraction
     "hill_estimator",
     "jarque_bera_stat",
