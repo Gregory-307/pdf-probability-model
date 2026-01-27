@@ -94,7 +94,7 @@ class CVaR:
     Conditional Value at Risk (Expected Shortfall).
 
     CVaR_alpha(X) = E[X | X <= VaR_alpha(X)]
-                  = E[-L | L >= VaR_alpha] for losses L = -X
+                  = (1/alpha) * integral_{-inf}^{VaR} x * f(x) dx
 
     CVaR captures the expected loss given that we are in the tail.
 
@@ -119,46 +119,54 @@ class CVaR:
         params: object,
         alpha: float = 0.05,
         t: float = 0.0,
-        n_samples: int = 100000,
-        rng: np.random.Generator | None = None,
     ) -> float:
         """
         Compute CVaR at confidence level (1 - alpha).
 
-        Uses Monte Carlo sampling for general distributions.
+        Uses numerical integration of x * pdf(x) over the tail.
 
         Args:
-            dist: Distribution with sample method
+            dist: Distribution with pdf and ppf methods
             params: Distribution parameters
             alpha: Tail probability (default 0.05 for 95% CVaR)
             t: Time point
-            n_samples: Number of Monte Carlo samples
-            rng: Random number generator
 
         Returns:
             CVaR value (positive = expected loss in tail)
         """
+        from scipy import integrate
+
         if not 0 < alpha < 1:
             raise ValueError(f"alpha must be in (0, 1), got {alpha}")
 
-        if rng is None:
-            rng = np.random.default_rng()
+        # Get VaR (the alpha-quantile)
+        var_quantile = dist.ppf(np.array([alpha]), t, params)[0]
 
-        # Sample from distribution
-        samples = dist.sample(n_samples, t, params, rng)
+        # CVaR = (1/alpha) * integral_{-inf}^{var_quantile} x * f(x) dx
+        # We integrate x * pdf(x) from a practical lower bound to VaR
+        def integrand(x: float) -> float:
+            pdf_val = dist.pdf(np.array([x]), t, params)[0]
+            return x * pdf_val
 
-        # Find VaR quantile
-        var_quantile = np.percentile(samples, alpha * 100)
+        # Determine practical lower bound (far into left tail)
+        # Use VaR as reference point and go 10 "VaR distances" below
+        if var_quantile < 0:
+            lower_bound = var_quantile * 10  # For negative VaR, multiply makes more negative
+        else:
+            lower_bound = var_quantile - 10 * abs(var_quantile) - 0.5  # Ensure we go left
 
-        # Expected value in the tail
-        tail_samples = samples[samples <= var_quantile]
+        # Numerical integration
+        integral_result, _ = integrate.quad(
+            integrand,
+            lower_bound,
+            var_quantile,
+            limit=100,
+        )
 
-        if len(tail_samples) == 0:
-            # Fallback: use the lowest samples
-            n_tail = max(1, int(n_samples * alpha))
-            tail_samples = np.sort(samples)[:n_tail]
+        # CVaR = -E[X | X <= VaR] (negated because losses are negative returns)
+        cvar_value = -integral_result / alpha
 
-        return -float(np.mean(tail_samples))
+        return float(cvar_value)
 
 
 def var(
@@ -176,11 +184,43 @@ def cvar(
     params: object,
     alpha: float = 0.05,
     t: float = 0.0,
+) -> float:
+    """
+    Compute CVaR using numerical integration.
+
+    This is the preferred method - exact up to numerical precision.
+    """
+    return CVaR()(dist, params, alpha, t)
+
+
+def cvar_mc(
+    dist: Distribution,
+    params: object,
+    alpha: float = 0.05,
+    t: float = 0.0,
     n_samples: int = 100000,
     rng: np.random.Generator | None = None,
 ) -> float:
-    """Convenience function for CVaR."""
-    return CVaR()(dist, params, alpha, t, n_samples, rng)
+    """
+    Compute CVaR using Monte Carlo sampling.
+
+    Use this when numerical integration is too slow or for validation.
+    """
+    if not 0 < alpha < 1:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    samples = dist.sample(n_samples, t, params, rng)
+    var_quantile = np.percentile(samples, alpha * 100)
+    tail_samples = samples[samples <= var_quantile]
+
+    if len(tail_samples) == 0:
+        n_tail = max(1, int(n_samples * alpha))
+        tail_samples = np.sort(samples)[:n_tail]
+
+    return -float(np.mean(tail_samples))
 
 
 # =============================================================================
@@ -199,31 +239,33 @@ def var_with_ci(
     rng: np.random.Generator | None = None,
 ) -> RiskMetric:
     """
-    Compute VaR with confidence interval via bootstrap.
+    Compute VaR with confidence interval.
+
+    Point estimate uses exact ppf. CI uses parametric bootstrap to quantify
+    sampling variability (useful for understanding estimation stability).
 
     Args:
-        dist: Distribution with sample method
+        dist: Distribution with ppf and sample methods
         params: Distribution parameters
         alpha: Tail probability (default 0.05 for 95% VaR)
         t: Time point
         confidence_level: CI level (default 0.90 for 90% CI)
-        n_samples: Number of samples from distribution
+        n_samples: Number of samples for bootstrap
         n_bootstrap: Number of bootstrap iterations
         rng: Random number generator
 
     Returns:
         RiskMetric with value and confidence_interval
     """
+    # Point estimate: exact via ppf
+    var_val = var(dist, params, alpha, t)
+
+    # Bootstrap CI via parametric bootstrap
     if rng is None:
         rng = np.random.default_rng()
 
-    # Sample from distribution
     samples = dist.sample(n_samples, t, params, rng)
 
-    # Point estimate
-    var_val = -float(np.quantile(samples, alpha))
-
-    # Bootstrap CI
     var_boots = []
     for _ in range(n_bootstrap):
         boot_idx = rng.choice(n_samples, n_samples, replace=True)
@@ -254,33 +296,33 @@ def cvar_with_ci(
     rng: np.random.Generator | None = None,
 ) -> RiskMetric:
     """
-    Compute CVaR with confidence interval via bootstrap.
+    Compute CVaR with confidence interval.
+
+    Point estimate uses exact numerical integration. CI uses parametric
+    bootstrap to quantify sampling variability.
 
     Args:
-        dist: Distribution with sample method
+        dist: Distribution with pdf, ppf and sample methods
         params: Distribution parameters
         alpha: Tail probability (default 0.05 for 95% CVaR)
         t: Time point
         confidence_level: CI level (default 0.90 for 90% CI)
-        n_samples: Number of samples from distribution
+        n_samples: Number of samples for bootstrap
         n_bootstrap: Number of bootstrap iterations
         rng: Random number generator
 
     Returns:
         RiskMetric with value and confidence_interval
     """
+    # Point estimate: exact via numerical integration
+    cvar_val = cvar(dist, params, alpha, t)
+
+    # Bootstrap CI via parametric bootstrap
     if rng is None:
         rng = np.random.default_rng()
 
-    # Sample from distribution
     samples = dist.sample(n_samples, t, params, rng)
 
-    # Point estimate
-    threshold = np.quantile(samples, alpha)
-    tail = samples[samples <= threshold]
-    cvar_val = -float(np.mean(tail)) if len(tail) > 0 else -threshold
-
-    # Bootstrap CI
     cvar_boots = []
     for _ in range(n_bootstrap):
         boot_idx = rng.choice(n_samples, n_samples, replace=True)
