@@ -266,6 +266,9 @@ class NIGDistribution(TimeEvolvingDistribution[NIGParameters]):
         """
         Cumulative distribution function (numerical integration).
 
+        Uses scipy.integrate.quad for accurate integration from practical
+        -infinity to each query point. This properly captures tail probabilities.
+
         Args:
             x: Array of values
             t: Time point
@@ -274,23 +277,30 @@ class NIGDistribution(TimeEvolvingDistribution[NIGParameters]):
         Returns:
             Array of CDF values
         """
+        from scipy import integrate
+
         x = np.asarray(x, dtype=np.float64)
 
-        # Create fine grid for integration
-        x_min = x.min() - 10 * params.delta
-        x_max = x.max()
+        # Time-evolved parameters
+        mu_t = params.mu + params.mu_drift * t
+        delta_t = params._delta_at_time(t)
 
-        # Integration grid
-        n_points = 10000
-        x_grid = np.linspace(x_min, x_max, n_points)
-        pdf_grid = self.pdf(x_grid, t, params)
+        # For each query point, integrate from practical -infinity
+        # Use a wide range that captures >99.99% of probability
+        lower_bound = mu_t - 20 * delta_t
 
-        # Cumulative integration
-        dx = x_grid[1] - x_grid[0]
-        cdf_grid = np.cumsum(pdf_grid) * dx
+        def pdf_scalar(z: float) -> float:
+            return self.pdf(np.array([z]), t, params)[0]
 
-        # Interpolate to requested points
-        return np.interp(x, x_grid, cdf_grid)
+        results = np.empty_like(x)
+        for i, xi in enumerate(x):
+            if xi <= lower_bound:
+                results[i] = 0.0
+            else:
+                val, _ = integrate.quad(pdf_scalar, lower_bound, xi, limit=100)
+                results[i] = np.clip(val, 0.0, 1.0)
+
+        return results
 
     def ppf(
         self,
@@ -301,6 +311,9 @@ class NIGDistribution(TimeEvolvingDistribution[NIGParameters]):
         """
         Percent point function (quantile function / inverse CDF).
 
+        Uses scipy.optimize.brentq for accurate root-finding of CDF(x) = q.
+        Falls back to grid interpolation if brentq fails.
+
         Args:
             q: Array of quantiles (0 < q < 1)
             t: Time point
@@ -309,22 +322,35 @@ class NIGDistribution(TimeEvolvingDistribution[NIGParameters]):
         Returns:
             Array of values corresponding to quantiles
         """
+        from scipy import optimize
+
         q = np.asarray(q, dtype=np.float64)
 
-        # Time-evolved parameters for determining range
+        # Time-evolved parameters for determining search range
         mu_t = params.mu + params.mu_drift * t
         delta_t = params._delta_at_time(t)
 
-        # Create grid spanning likely range
-        x_min = mu_t - 10 * delta_t
-        x_max = mu_t + 10 * delta_t
+        results = np.empty_like(q)
+        for i, qi in enumerate(q):
+            # Define function to find root of: CDF(x) - q = 0
+            def objective(x: float) -> float:
+                cdf_val = self.cdf(np.array([x]), t, params)[0]
+                return cdf_val - qi
 
-        n_points = 10000
-        x_grid = np.linspace(x_min, x_max, n_points)
-        cdf_grid = self.cdf(x_grid, t, params)
+            # Search in a wide range
+            x_low = mu_t - 15 * delta_t
+            x_high = mu_t + 15 * delta_t
 
-        # Interpolate to find x values for given quantiles
-        return np.interp(q, cdf_grid, x_grid)
+            try:
+                result = optimize.brentq(objective, x_low, x_high)
+                results[i] = result
+            except ValueError:
+                # Fallback to grid search if brentq fails
+                x_grid = np.linspace(x_low, x_high, 10000)
+                cdf_grid = self.cdf(x_grid, t, params)
+                results[i] = np.interp(qi, cdf_grid, x_grid)
+
+        return results
 
     def mean(self, t: float, params: NIGParameters) -> float:
         """

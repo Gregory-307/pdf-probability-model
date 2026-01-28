@@ -96,7 +96,7 @@ SkewNormal = SkewNormalDistribution
 NIG = NIGDistribution
 
 # Scoring rules
-from .scoring import CRPS, LogScore, crps, log_score, crps_normal
+from .scoring import CRPS, LogScore, crps, crps_mc, log_score, crps_normal
 
 # Decision utilities
 from .decision import (
@@ -104,6 +104,7 @@ from .decision import (
     CVaR,
     var,
     cvar,
+    cvar_mc,
     KellyCriterion,
     kelly_fraction,
     fractional_kelly,
@@ -332,6 +333,7 @@ __all__ = [
     "CRPS",
     "LogScore",
     "crps",
+    "crps_mc",
     "log_score",
     "crps_normal",
     # Decision utilities
@@ -339,6 +341,7 @@ __all__ = [
     "CVaR",
     "var",
     "cvar",
+    "cvar_mc",
     "KellyCriterion",
     "kelly_fraction",
     "fractional_kelly",

@@ -59,25 +59,32 @@ class TestCRPS:
 
     def test_crps_non_negative(self, nig, params):
         """Test that CRPS is always non-negative."""
-        rng = np.random.default_rng(42)
+        # Using numerical integration (no rng needed)
         for y in [-0.1, 0, 0.1]:
-            score = tpdf.crps(nig, params, y, t=0, rng=rng)
+            score = tpdf.crps(nig, params, y, t=0)
             assert score >= 0
 
     def test_crps_small_for_tight_distribution(self, nig):
         """Test that CRPS is small for tight distribution near observation."""
         # NIG with small delta = tight distribution
         params_tight = tpdf.NIGParameters(mu=0.0, delta=0.001, alpha=15.0, beta=0.0)
-        rng = np.random.default_rng(42)
-        score = tpdf.crps(nig, params_tight, y=0.0, t=0, rng=rng)
+        score = tpdf.crps(nig, params_tight, y=0.0, t=0)
         assert score < 0.01
 
     def test_crps_increases_with_distance(self, nig, params):
         """Test that CRPS increases as observation moves from mean."""
-        rng = np.random.default_rng(42)
-        score_at_mean = tpdf.crps(nig, params, y=0.0, t=0, rng=rng)
-        score_away = tpdf.crps(nig, params, y=0.2, t=0, rng=rng)
+        score_at_mean = tpdf.crps(nig, params, y=0.0, t=0)
+        score_away = tpdf.crps(nig, params, y=0.2, t=0)
         assert score_away > score_at_mean
+
+    def test_crps_mc_matches_numerical(self, nig, params):
+        """Test that Monte Carlo CRPS is close to numerical integration."""
+        y = 0.0
+        score_num = tpdf.crps(nig, params, y, t=0)
+        rng = np.random.default_rng(42)
+        score_mc = tpdf.crps_mc(nig, params, y, t=0, n_samples=100000, rng=rng)
+        # Should be within 30% (MC has variance, NIG tails are complex)
+        assert abs(score_num - score_mc) / score_num < 0.3
 
 
 class TestCRPSNormal:

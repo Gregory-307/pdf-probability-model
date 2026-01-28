@@ -8,7 +8,7 @@ References:
     Bell System Technical Journal, 35(4), 917-926.
 """
 
-from .risk import VaR, CVaR, var, cvar, var_with_ci, cvar_with_ci
+from .risk import VaR, CVaR, var, cvar, cvar_mc, var_with_ci, cvar_with_ci
 from .kelly import KellyCriterion, kelly_fraction, fractional_kelly, kelly_with_ci
 from .probability import prob_greater_than, prob_less_than, prob_between
 
@@ -18,6 +18,7 @@ __all__ = [
     "CVaR",
     "var",
     "cvar",
+    "cvar_mc",  # Monte Carlo alternative
     "KellyCriterion",
     "kelly_fraction",
     "fractional_kelly",

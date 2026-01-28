@@ -94,7 +94,7 @@ class CVaR:
     Conditional Value at Risk (Expected Shortfall).
 
     CVaR_alpha(X) = E[X | X <= VaR_alpha(X)]
-                  = E[-L | L >= VaR_alpha] for losses L = -X
+                  = (1/alpha) * integral_{-inf}^{VaR} x * f(x) dx
 
     CVaR captures the expected loss given that we are in the tail.
 
@@ -119,46 +119,65 @@ class CVaR:
         params: object,
         alpha: float = 0.05,
         t: float = 0.0,
-        n_samples: int = 100000,
-        rng: np.random.Generator | None = None,
     ) -> float:
         """
         Compute CVaR at confidence level (1 - alpha).
 
-        Uses Monte Carlo sampling for general distributions.
+        Uses numerical integration of x * pdf(x) over the tail,
+        with proper normalization by the actual tail probability.
 
         Args:
-            dist: Distribution with sample method
+            dist: Distribution with pdf and ppf methods
             params: Distribution parameters
             alpha: Tail probability (default 0.05 for 95% CVaR)
             t: Time point
-            n_samples: Number of Monte Carlo samples
-            rng: Random number generator
 
         Returns:
             CVaR value (positive = expected loss in tail)
         """
+        from scipy import integrate
+
         if not 0 < alpha < 1:
             raise ValueError(f"alpha must be in (0, 1), got {alpha}")
 
-        if rng is None:
-            rng = np.random.default_rng()
+        # Get VaR (the alpha-quantile)
+        var_quantile = dist.ppf(np.array([alpha]), t, params)[0]
 
-        # Sample from distribution
-        samples = dist.sample(n_samples, t, params, rng)
+        # Define integrands
+        def x_times_pdf(x: float) -> float:
+            pdf_val = dist.pdf(np.array([x]), t, params)[0]
+            return x * pdf_val
 
-        # Find VaR quantile
-        var_quantile = np.percentile(samples, alpha * 100)
+        def pdf_only(x: float) -> float:
+            return dist.pdf(np.array([x]), t, params)[0]
 
-        # Expected value in the tail
-        tail_samples = samples[samples <= var_quantile]
+        # Use a very small quantile as the lower bound
+        lower_bound = dist.ppf(np.array([0.00001]), t, params)[0]
 
-        if len(tail_samples) == 0:
-            # Fallback: use the lowest samples
-            n_tail = max(1, int(n_samples * alpha))
-            tail_samples = np.sort(samples)[:n_tail]
+        # Integrate x * f(x) from lower to VaR
+        integral_x_pdf, _ = integrate.quad(
+            x_times_pdf,
+            lower_bound,
+            var_quantile,
+            limit=100,
+        )
 
-        return -float(np.mean(tail_samples))
+        # Integrate f(x) to get actual tail probability (more accurate than using alpha)
+        integral_pdf, _ = integrate.quad(
+            pdf_only,
+            lower_bound,
+            var_quantile,
+            limit=100,
+        )
+
+        # CVaR = E[X | X <= VaR] = integral(x*f(x)) / integral(f(x))
+        # We negate because CVaR is reported as positive loss
+        if integral_pdf > 1e-10:
+            expected_tail = integral_x_pdf / integral_pdf
+        else:
+            expected_tail = var_quantile  # Fallback
+
+        return float(-expected_tail)
 
 
 def var(
@@ -176,11 +195,56 @@ def cvar(
     params: object,
     alpha: float = 0.05,
     t: float = 0.0,
+) -> float:
+    """
+    Compute CVaR using numerical integration.
+
+    This is the preferred method - exact up to numerical precision.
+    For faster approximate results, use cvar_mc().
+    """
+    return CVaR()(dist, params, alpha, t)
+
+
+def cvar_mc(
+    dist: Distribution,
+    params: object,
+    alpha: float = 0.05,
+    t: float = 0.0,
     n_samples: int = 100000,
     rng: np.random.Generator | None = None,
 ) -> float:
-    """Convenience function for CVaR."""
-    return CVaR()(dist, params, alpha, t, n_samples, rng)
+    """
+    Compute CVaR using Monte Carlo sampling.
+
+    Use this when numerical integration is too slow or for validation.
+    Faster than cvar() but has ~1% sampling variance with default n_samples.
+
+    Args:
+        dist: Distribution with sample method
+        params: Distribution parameters
+        alpha: Tail probability (default 0.05 for 95% CVaR)
+        t: Time point
+        n_samples: Number of Monte Carlo samples
+        rng: Random number generator
+
+    Returns:
+        CVaR value (positive = expected loss in tail)
+    """
+    if not 0 < alpha < 1:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    samples = dist.sample(n_samples, t, params, rng)
+    var_quantile = np.percentile(samples, alpha * 100)
+    tail_samples = samples[samples <= var_quantile]
+
+    if len(tail_samples) == 0:
+        n_tail = max(1, int(n_samples * alpha))
+        tail_samples = np.sort(samples)[:n_tail]
+
+    return -float(np.mean(tail_samples))
 
 
 # =============================================================================

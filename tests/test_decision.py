@@ -55,23 +55,29 @@ class TestCVaR:
 
     def test_cvar_greater_than_var(self, nig, params):
         """Test that CVaR >= VaR (expected shortfall >= threshold)."""
-        rng = np.random.default_rng(42)
+        # Using numerical integration (no rng needed, deterministic)
         var_95 = tpdf.var(nig, params, alpha=0.05)
-        cvar_95 = tpdf.cvar(nig, params, alpha=0.05, rng=rng)
-        assert cvar_95 >= var_95 * 0.9  # Allow some Monte Carlo error
+        cvar_95 = tpdf.cvar(nig, params, alpha=0.05)
+        assert cvar_95 >= var_95  # CVaR is always >= VaR
 
     def test_cvar_positive(self, nig, params):
         """Test that CVaR is positive for risky distribution."""
-        rng = np.random.default_rng(42)
-        cvar_95 = tpdf.cvar(nig, params, alpha=0.05, rng=rng)
+        cvar_95 = tpdf.cvar(nig, params, alpha=0.05)
         assert cvar_95 > 0
 
     def test_cvar_increases_with_confidence(self, nig, params):
         """Test that CVaR increases with confidence level."""
-        rng = np.random.default_rng(42)
-        cvar_90 = tpdf.cvar(nig, params, alpha=0.10, rng=rng)
-        cvar_99 = tpdf.cvar(nig, params, alpha=0.01, rng=rng)
+        cvar_90 = tpdf.cvar(nig, params, alpha=0.10)
+        cvar_99 = tpdf.cvar(nig, params, alpha=0.01)
         assert cvar_99 > cvar_90
+
+    def test_cvar_mc_matches_numerical(self, nig, params):
+        """Test that Monte Carlo CVaR is close to numerical integration."""
+        cvar_num = tpdf.cvar(nig, params, alpha=0.05)
+        rng = np.random.default_rng(42)
+        cvar_mc = tpdf.cvar_mc(nig, params, alpha=0.05, n_samples=200000, rng=rng)
+        # Should be within 15% (MC has variance, CVaR is in the tail)
+        assert abs(cvar_num - cvar_mc) / cvar_num < 0.15
 
 
 class TestKelly:
