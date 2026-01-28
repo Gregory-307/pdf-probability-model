@@ -59,3 +59,29 @@ The showcase demonstrates:
 - Forget that Pipeline 2 trains a model to output distribution parameters
 - Show only Pipeline 1 and call it a comparison
 - Make visualizations with text boxes instead of actual plots
+
+## Documentation Progress
+
+### Completed
+- **docs/ARCHITECTURE.md** — Comprehensive architecture reference covering all 50 source files, 10 submodules, 4 root files. Contains:
+  - Four-layer architecture (Foundation → Operations → Outputs → Integration) with dependency rule rationale
+  - Module-by-module breakdown with Description and Why It Exists columns
+  - Class hierarchy (Mermaid classDiagram) showing inheritance, protocol satisfaction, parameter↔distribution mapping
+  - Interface specifications inline (Distribution protocol, TimeEvolvingDistribution ABC, VolatilityModel, WeightScheme, DynamicsModel)
+  - Option tables at every pipeline stage (5 distributions, 5 volatility models, 6 weighting schemes, 5 dynamics models, etc.)
+  - Design rationale inline where questions arise (frozen params, V1/V2 coexistence, core/ vs temporal/ for volatility, NIG closure)
+  - Data flow diagrams (complete pipeline, module dependencies)
+  - Usage patterns (4 patterns with code)
+  - All abbreviations expanded on first use
+
+### Remaining Phases
+- **Core Concept** — The "reason for being" of the repo (distributional regression, Pipeline 1 vs 2)
+- **Math** — Distribution math, scoring rule math, decision utility math
+- **Mental Models** — How to think about when to use what
+- **Visual Guide** — What the plots mean, how to interpret them
+
+### User Notes
+- User does not fully understand their own repository and needs documentation to learn it over 2-3 days
+- Work in phases: explore/research first, then plan/write
+- Do NOT use the explorer agent on the full repo (too large) — use it on specific smaller modules
+- Information belongs where the reader encounters the question, not in separate appendix sections
