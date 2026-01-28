@@ -97,3 +97,4 @@ data/
 output*.png
 *.png
 !Probability_Distribution_Functionality.png
+.venv312/
