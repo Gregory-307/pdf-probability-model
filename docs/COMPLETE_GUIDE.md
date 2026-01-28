@@ -16,7 +16,8 @@ A Python library for **distributional regression** and **probabilistic forecasti
 8. [Decision Utilities](#8-decision-utilities)
 9. [Temporal Modeling (V2)](#9-temporal-modeling-v2)
 10. [Backtesting](#10-backtesting)
-11. [Glossary](#11-glossary)
+11. [Complete Pipeline: Where Distribution Functions Are Used](#11-complete-pipeline-where-distribution-functions-are-used)
+12. [Glossary](#12-glossary)
 
 ---
 
@@ -978,7 +979,188 @@ If VaR violations cluster, the model fails to capture volatility dynamics.
 
 ---
 
-## 11. Glossary
+## 11. Complete Pipeline: Where Distribution Functions Are Used
+
+This section maps exactly where PDF, CDF, PPF, and sampling are used across the entire library.
+
+### Stage 1: Distribution Selection (`discover()`)
+
+**Goal**: Choose which distribution family (Normal, Student-t, Normal Inverse Gaussian) best fits the data.
+
+| Step | What happens | Uses |
+|------|--------------|------|
+| Fit each candidate | Maximum Likelihood Estimation to find parameters | **PDF** |
+| Score on held-out data | Continuous Ranked Probability Score or Log Score | **CDF** or **PDF** |
+| Compare scores | Paired t-test across cross-validation folds | Statistics only |
+
+**How it works:**
+1. Split data into K folds (e.g., 5)
+2. For each fold: fit each candidate distribution on training portion, score on test portion
+3. **Fitting**: Find parameters θ that maximize Σ log(pdf(xᵢ; θ)) — the parameters that make observed data most probable
+4. **Scoring with Continuous Ranked Probability Score**: Measures how well the predicted cumulative distribution function matches reality. Computed as ∫F(x)² dx + ∫(1-F(x))² dx around each observation. Lower = better fit.
+5. **Scoring with Log Score**: Simply -log(pdf(y)) — how much probability density the distribution assigned to what actually happened
+6. Average scores across folds, pick distribution with lowest average score
+7. Confidence determined by whether score differences are statistically significant
+
+### Stage 2: Parameter Fitting (`fit_nig()`, `fit_student_t()`, etc.)
+
+**Goal**: Estimate distribution parameters (μ, δ, α, β for Normal Inverse Gaussian) from observed data.
+
+| Step | What happens | Uses |
+|------|--------------|------|
+| Maximum Likelihood Estimation optimization | Find θ that maximizes Σ log(pdf(xᵢ; θ)) | **PDF** |
+
+**How it works:**
+1. Start with initial parameter guess (often from sample moments: mean, variance, skewness, kurtosis)
+2. Define objective: negative log-likelihood = -Σ log(pdf(xᵢ; θ))
+3. Use numerical optimizer (Nelder-Mead, L-BFGS-B) to minimize this
+4. Optimizer tries different θ values, evaluates PDF at each data point, sums log-probabilities
+5. Converges to parameters that make the observed data most probable under the distribution
+6. Return fitted parameter object (e.g., `NIGParameters(mu=0.001, delta=0.02, alpha=15, beta=-0.5)`)
+
+**Why Maximum Likelihood Estimation**: It's consistent (converges to true parameters with enough data), efficient (achieves lowest possible variance), and has known statistical properties for confidence intervals.
+
+### Stage 3: Risk Metrics (`var()`, `cvar()`, `kelly()`)
+
+**Goal**: Compute actionable risk measures from the fitted distribution.
+
+| Metric | Formula | Uses |
+|--------|---------|------|
+| Value at Risk | -F⁻¹(α) | **PPF** (percent point function / quantile) |
+| Conditional Value at Risk | ∫ x·f(x) dx / ∫ f(x) dx over tail | **PDF** + numerical integration |
+| Kelly fraction | μ/σ² | **mean/variance** (closed form or integration) |
+| P(X > k) | 1 - F(k) | **CDF** |
+
+**How Value at Risk works:**
+1. Value at Risk answers: "What's the loss threshold such that we only exceed it α% of the time?"
+2. This is the α-quantile of the return distribution, negated (since losses are negative returns)
+3. Computed by evaluating the inverse cumulative distribution function: `ppf(α)`
+4. Example: 95% Value at Risk with α=0.05 gives the 5th percentile, negated
+5. If ppf(0.05) = -0.032, then Value at Risk = 0.032, meaning "5% chance of losing more than 3.2%"
+
+**How Conditional Value at Risk works:**
+1. Conditional Value at Risk answers: "If we're in the worst α% of outcomes, what's the expected loss?"
+2. It's the conditional expectation E[X | X ≤ Value at Risk quantile]
+3. Computed by integrating x × pdf(x) over the left tail, divided by the tail probability
+4. Numerically: ∫_{-∞}^{quantile} x·f(x) dx / ∫_{-∞}^{quantile} f(x) dx
+5. Always ≥ Value at Risk because it captures the severity of tail losses, not just the threshold
+
+**How Kelly works:**
+1. Kelly criterion answers: "What fraction of wealth should I bet to maximize long-run growth?"
+2. For small returns: optimal fraction ≈ μ/σ² (expected return divided by variance)
+3. Uses the distribution's mean and variance, which can be computed from parameters or by integrating x·pdf(x) and (x-μ)²·pdf(x)
+
+### Stage 4: Confidence Intervals on Risk Metrics
+
+**Goal**: Quantify how uncertain our Value at Risk/Conditional Value at Risk estimates are due to finite data.
+
+**Source of uncertainty**: We estimated parameters from N data points. Different data would give different parameters → different risk metrics.
+
+| Step | What happens | Uses |
+|------|--------------|------|
+| Bootstrap resample original data | Draw N samples with replacement from original observations | None |
+| Re-fit parameters | Maximum Likelihood Estimation on bootstrap sample | **PDF** |
+| Compute metric | Value at Risk or Conditional Value at Risk with new parameters | **PPF/PDF** |
+| Repeat B times (e.g., 1000) | Get distribution of metric estimates | — |
+| Extract confidence interval | 5th and 95th percentile of bootstrap metrics | — |
+
+**How it should work:**
+1. Original data: [x₁, x₂, ..., xₙ] → fit → params → Value at Risk = 0.032
+2. Bootstrap sample 1: [x₃, x₃, x₇, x₁, ...] (same size, with replacement) → fit → params₁ → Value at Risk₁ = 0.029
+3. Bootstrap sample 2: [x₅, x₂, x₂, x₉, ...] → fit → params₂ → Value at Risk₂ = 0.035
+4. ... repeat 1000 times ...
+5. Sort all Value at Risk values, take 5th and 95th percentile → 90% confidence interval
+
+**Why bootstrap**: It approximates the sampling distribution of the estimator without assuming a parametric form. The spread of bootstrap estimates reflects how much our estimate would vary with different data samples.
+
+### Stage 5: Multi-Period Scaling
+
+**Goal**: Predict the distribution of N-day cumulative returns from daily parameters.
+
+| Step | What happens | Uses |
+|------|--------------|------|
+| Scale parameters | Normal Inverse Gaussian: μ_N = N·μ, δ_N = N·δ, α unchanged, β unchanged | Convolution property |
+| Compute P(sum > barrier) | 1 - F_N(barrier) | **CDF** of scaled distribution |
+
+**How it works:**
+1. Daily returns follow Normal Inverse Gaussian(μ, δ, α, β)
+2. Sum of N independent Normal Inverse Gaussian random variables is also Normal Inverse Gaussian (closure under convolution)
+3. The N-day sum follows Normal Inverse Gaussian(N·μ, N·δ, α, β)
+4. To find P(10-day cumulative > 3%): evaluate 1 - CDF(0.03) using the scaled parameters
+5. No simulation needed — it's a single cumulative distribution function evaluation
+
+**Why this matters**: You can answer questions about any horizon without retraining. "What's P(5-day loss > 2%)?" Just scale parameters and evaluate cumulative distribution function.
+
+**Limitation**: This assumes returns are independent and identically distributed. Real returns have autocorrelation and volatility clustering, which this ignores.
+
+### Stage 6: Scoring Predictions (`crps()`, `log_score()`)
+
+**Goal**: Evaluate how well a predicted distribution matched what actually happened (for model validation/comparison).
+
+| Score | Formula | Uses |
+|-------|---------|------|
+| Continuous Ranked Probability Score | ∫ F(x)² dx + ∫ (1-F(x))² dx | **CDF** |
+| Log Score | -log(f(y)) | **PDF** |
+
+**How Continuous Ranked Probability Score works:**
+1. You predicted distribution F, actual outcome was y
+2. Continuous Ranked Probability Score measures the "distance" between your cumulative distribution function and the step function at y
+3. Formula: ∫_{-∞}^{y} F(x)² dx + ∫_{y}^{∞} (1-F(x))² dx
+4. If your distribution was concentrated near y, both integrals are small → low score
+5. If your distribution was far from y, the integrals accumulate error → high score
+6. Generalizes Mean Absolute Error to probabilistic forecasts
+7. Same units as the data (e.g., percent return)
+
+**How Log Score works:**
+1. You predicted distribution f, actual outcome was y
+2. Log Score = -log(f(y)) — how much probability density you assigned to what happened
+3. If you assigned high density to y → small negative log → good score
+4. If you assigned low density to y → large negative log → bad score
+5. Penalizes overconfident wrong predictions heavily (if f(y) ≈ 0, score → ∞)
+
+**Why these are "proper"**: A proper scoring rule is one where reporting your true belief gives the best expected score. You can't game it by lying about your distribution.
+
+### Stage 7: Backtesting
+
+**Goal**: Validate that the Value at Risk model works on historical data.
+
+| Step | What happens | Uses |
+|------|--------------|------|
+| Rolling Value at Risk | At each time t, fit distribution on past data, compute Value at Risk | **PPF** |
+| Count exceedances | How often did actual loss > predicted Value at Risk | Comparison |
+| Kupiec test | Is exceedance rate statistically ≈ α? | Chi-squared test |
+| Christoffersen test | Are exceedances independent (not clustered)? | Markov chain test |
+
+**How it works:**
+1. At time t=100: fit distribution on returns [1..99], compute 95% Value at Risk
+2. At time t=101: check if return₁₀₀ < -Value at Risk (exceedance?)
+3. Repeat for all t in test period
+4. Count exceedances. For 95% Value at Risk over 1000 days, expect ~50 exceedances
+5. **Kupiec test**: Tests if observed exceedance rate ≈ 5%. Uses likelihood ratio statistic.
+6. **Christoffersen test**: Tests if exceedances are independent. If violations cluster (multiple bad days in a row), the model fails to capture volatility dynamics.
+
+### Summary: What Each Function Needs
+
+| Function | PDF | CDF | PPF | Sample |
+|----------|-----|-----|-----|--------|
+| `fit_*()` | ✓ | | | |
+| `discover()` | ✓ | ✓ | | |
+| `var()` | | | ✓ | |
+| `cvar()` | ✓ | | ✓ | |
+| `crps()` | | ✓ | ✓ | |
+| `log_score()` | ✓ | | | |
+| `kelly()` | | | | |
+| `prob_*()` | | ✓ | | |
+| `*_with_ci()` | ✓ | | ✓ | needs original data |
+
+**Sampling is only needed for:**
+- Validation (comparing numerical methods to Monte Carlo)
+- Path-dependent problems (barrier hit at ANY point requires simulating paths)
+- When numerical integration is prohibitively slow
+
+---
+
+## 12. Glossary
 
 | Term | Definition |
 |------|------------|
