@@ -123,7 +123,8 @@ class CVaR:
         """
         Compute CVaR at confidence level (1 - alpha).
 
-        Uses numerical integration of x * pdf(x) over the tail.
+        Uses numerical integration of x * pdf(x) over the tail,
+        with proper normalization by the actual tail probability.
 
         Args:
             dist: Distribution with pdf and ppf methods
@@ -142,31 +143,41 @@ class CVaR:
         # Get VaR (the alpha-quantile)
         var_quantile = dist.ppf(np.array([alpha]), t, params)[0]
 
-        # CVaR = (1/alpha) * integral_{-inf}^{var_quantile} x * f(x) dx
-        # We integrate x * pdf(x) from a practical lower bound to VaR
-        def integrand(x: float) -> float:
+        # Define integrands
+        def x_times_pdf(x: float) -> float:
             pdf_val = dist.pdf(np.array([x]), t, params)[0]
             return x * pdf_val
 
-        # Determine practical lower bound (far into left tail)
-        # Use VaR as reference point and go 10 "VaR distances" below
-        if var_quantile < 0:
-            lower_bound = var_quantile * 10  # For negative VaR, multiply makes more negative
-        else:
-            lower_bound = var_quantile - 10 * abs(var_quantile) - 0.5  # Ensure we go left
+        def pdf_only(x: float) -> float:
+            return dist.pdf(np.array([x]), t, params)[0]
 
-        # Numerical integration
-        integral_result, _ = integrate.quad(
-            integrand,
+        # Use a very small quantile as the lower bound
+        lower_bound = dist.ppf(np.array([0.00001]), t, params)[0]
+
+        # Integrate x * f(x) from lower to VaR
+        integral_x_pdf, _ = integrate.quad(
+            x_times_pdf,
             lower_bound,
             var_quantile,
             limit=100,
         )
 
-        # CVaR = -E[X | X <= VaR] (negated because losses are negative returns)
-        cvar_value = -integral_result / alpha
+        # Integrate f(x) to get actual tail probability (more accurate than using alpha)
+        integral_pdf, _ = integrate.quad(
+            pdf_only,
+            lower_bound,
+            var_quantile,
+            limit=100,
+        )
 
-        return float(cvar_value)
+        # CVaR = E[X | X <= VaR] = integral(x*f(x)) / integral(f(x))
+        # We negate because CVaR is reported as positive loss
+        if integral_pdf > 1e-10:
+            expected_tail = integral_x_pdf / integral_pdf
+        else:
+            expected_tail = var_quantile  # Fallback
+
+        return float(-expected_tail)
 
 
 def var(
