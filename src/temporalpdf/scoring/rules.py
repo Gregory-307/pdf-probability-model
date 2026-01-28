@@ -105,8 +105,8 @@ class CRPS:
     """
     Continuous Ranked Probability Score.
 
-    CRPS(F, y) = integral (F(x) - 1{x >= y})^2 dx
-               = E|X - y| - 0.5 * E|X - X'|
+    CRPS(F, y) = integral_{-inf}^{inf} (F(x) - 1{x >= y})^2 dx
+               = integral_{-inf}^{y} F(x)^2 dx + integral_{y}^{inf} (1 - F(x))^2 dx
 
     Properties:
     - Strictly proper
@@ -135,54 +135,60 @@ class CRPS:
         params: object,
         y: float | NDArray[np.float64],
         t: float = 0.0,
-        n_samples: int = 10000,
-        rng: np.random.Generator | None = None,
     ) -> float | NDArray[np.float64]:
         """
-        Compute CRPS using Monte Carlo estimation.
+        Compute CRPS using numerical integration of CDF.
 
         Uses the representation:
-            CRPS = E|X - y| - 0.5 * E|X - X'|
+            CRPS = integral_{-inf}^{y} F(x)^2 dx + integral_{y}^{inf} (1 - F(x))^2 dx
 
         Args:
-            dist: Distribution object
+            dist: Distribution object with cdf method
             params: Distribution parameters
             y: Observation(s) to score
             t: Time point (default 0)
-            n_samples: Number of Monte Carlo samples
-            rng: Random number generator
 
         Returns:
             CRPS score(s) - lower is better
         """
+        from scipy import integrate
+
         y = np.atleast_1d(y)
 
-        if rng is None:
-            rng = np.random.default_rng()
-
-        # Check if distribution has sample method
-        if hasattr(dist, "sample"):
-            samples = dist.sample(n_samples, t, params, rng)
-        else:
-            # Fall back to inverse CDF sampling if available
-            if hasattr(dist, "ppf"):
-                u = rng.uniform(size=n_samples)
-                samples = dist.ppf(u, t, params)
-            else:
-                raise ValueError(
-                    "Distribution must have either 'sample' or 'ppf' method"
-                )
+        # Determine integration bounds based on distribution spread
+        # Use ppf to find practical bounds
+        lower_bound = float(dist.ppf(np.array([0.0001]), t, params)[0])
+        upper_bound = float(dist.ppf(np.array([0.9999]), t, params)[0])
 
         scores = np.empty(len(y))
         for i, yi in enumerate(y):
-            # E|X - y|
-            term1 = np.mean(np.abs(samples - yi))
+            yi_float = float(yi)
 
-            # E|X - X'| using all pairs would be O(n^2), use half-sample trick
-            half = n_samples // 2
-            term2 = np.mean(np.abs(samples[:half] - samples[half : 2 * half]))
+            # Left integral: integral_{lower}^{y} F(x)^2 dx
+            def left_integrand(x: float) -> float:
+                cdf_val = dist.cdf(np.array([x]), t, params)[0]
+                return cdf_val ** 2
 
-            scores[i] = term1 - 0.5 * term2
+            # Right integral: integral_{y}^{upper} (1 - F(x))^2 dx
+            def right_integrand(x: float) -> float:
+                cdf_val = dist.cdf(np.array([x]), t, params)[0]
+                return (1 - cdf_val) ** 2
+
+            left_integral, _ = integrate.quad(
+                left_integrand,
+                lower_bound,
+                yi_float,
+                limit=50,
+            )
+
+            right_integral, _ = integrate.quad(
+                right_integrand,
+                yi_float,
+                upper_bound,
+                limit=50,
+            )
+
+            scores[i] = left_integral + right_integral
 
         return float(scores[0]) if len(scores) == 1 else scores
 
@@ -202,11 +208,51 @@ def crps(
     params: object,
     y: float | NDArray[np.float64],
     t: float = 0.0,
+) -> float | NDArray[np.float64]:
+    """
+    Compute CRPS using numerical integration.
+
+    This is the preferred method - exact up to numerical precision.
+    """
+    return CRPS()(dist, params, y, t)
+
+
+def crps_mc(
+    dist: Distribution,
+    params: object,
+    y: float | NDArray[np.float64],
+    t: float = 0.0,
     n_samples: int = 10000,
     rng: np.random.Generator | None = None,
 ) -> float | NDArray[np.float64]:
-    """Convenience function for CRPS."""
-    return CRPS()(dist, params, y, t, n_samples, rng)
+    """
+    Compute CRPS using Monte Carlo sampling.
+
+    Uses the representation: CRPS = E|X - y| - 0.5 * E|X - X'|
+
+    Use this when numerical integration is too slow or for validation.
+    """
+    y_arr = np.atleast_1d(y)
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    if hasattr(dist, "sample"):
+        samples = dist.sample(n_samples, t, params, rng)
+    elif hasattr(dist, "ppf"):
+        u = rng.uniform(size=n_samples)
+        samples = dist.ppf(u, t, params)
+    else:
+        raise ValueError("Distribution must have 'sample' or 'ppf' method")
+
+    scores = np.empty(len(y_arr))
+    for i, yi in enumerate(y_arr):
+        term1 = np.mean(np.abs(samples - yi))
+        half = n_samples // 2
+        term2 = np.mean(np.abs(samples[:half] - samples[half : 2 * half]))
+        scores[i] = term1 - 0.5 * term2
+
+    return float(scores[0]) if len(scores) == 1 else scores
 
 
 def crps_normal(

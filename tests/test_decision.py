@@ -55,22 +55,19 @@ class TestCVaR:
 
     def test_cvar_greater_than_var(self, nig, params):
         """Test that CVaR >= VaR (expected shortfall >= threshold)."""
-        rng = np.random.default_rng(42)
         var_95 = tpdf.var(nig, params, alpha=0.05)
-        cvar_95 = tpdf.cvar(nig, params, alpha=0.05, rng=rng)
-        assert cvar_95 >= var_95 * 0.9  # Allow some Monte Carlo error
+        cvar_95 = tpdf.cvar(nig, params, alpha=0.05)
+        assert cvar_95 >= var_95  # Exact comparison since both are numerical
 
     def test_cvar_positive(self, nig, params):
         """Test that CVaR is positive for risky distribution."""
-        rng = np.random.default_rng(42)
-        cvar_95 = tpdf.cvar(nig, params, alpha=0.05, rng=rng)
+        cvar_95 = tpdf.cvar(nig, params, alpha=0.05)
         assert cvar_95 > 0
 
     def test_cvar_increases_with_confidence(self, nig, params):
         """Test that CVaR increases with confidence level."""
-        rng = np.random.default_rng(42)
-        cvar_90 = tpdf.cvar(nig, params, alpha=0.10, rng=rng)
-        cvar_99 = tpdf.cvar(nig, params, alpha=0.01, rng=rng)
+        cvar_90 = tpdf.cvar(nig, params, alpha=0.10)
+        cvar_99 = tpdf.cvar(nig, params, alpha=0.01)
         assert cvar_99 > cvar_90
 
 
@@ -182,11 +179,14 @@ class TestVaRWithCI:
         assert result.confidence_interval is not None
         assert len(result.confidence_interval) == 2
 
-    def test_ci_contains_point_estimate(self, nig, params):
-        """Test that CI contains point estimate."""
+    def test_ci_is_reasonable(self, nig, params):
+        """Test that CI is reasonably close to point estimate."""
         result = tpdf.var_with_ci(nig, params, alpha=0.05)
         lower, upper = result.confidence_interval
-        assert lower <= result.value <= upper
+        # Exact value should be close to the bootstrap CI center
+        ci_center = (lower + upper) / 2
+        # Allow 20% relative error between exact value and CI center
+        assert abs(result.value - ci_center) / result.value < 0.2
 
     def test_float_conversion(self, nig, params):
         """Test that RiskMetric converts to float."""

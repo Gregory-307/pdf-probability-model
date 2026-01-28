@@ -169,11 +169,26 @@ def _score_distribution(
     train_data: NDArray[np.float64],
     test_data: NDArray[np.float64],
     scoring: Sequence[str],
-    n_samples: int,
+    n_samples: int,  # kept for backward compatibility, not used for numerical methods
 ) -> list[float]:
-    """Compute scores for a distribution on test data."""
+    """Compute scores for a distribution on test data using numerical integration."""
+    from ..scoring.rules import crps as crps_numerical
+
     # Fit on training data
     params = _fit_distribution(dist_name, train_data)
+
+    # Get distribution instance
+    if dist_name == "normal":
+        from ..distributions.normal import NormalDistribution
+        dist = NormalDistribution()
+    elif dist_name == "student_t":
+        from ..distributions.student_t import StudentTDistribution
+        dist = StudentTDistribution()
+    elif dist_name == "nig":
+        from ..distributions.nig import NIGDistribution
+        dist = NIGDistribution()
+    else:
+        raise ValueError(f"Unknown distribution: {dist_name}")
 
     scores = []
 
@@ -182,28 +197,14 @@ def _score_distribution(
 
         if "crps" in scoring:
             if dist_name == "normal":
+                # Use closed-form for Normal (fastest)
                 score += crps_normal(y, params.mu_0, params.sigma_0)
-            elif dist_name == "student_t":
-                samples = stats.t.rvs(
-                    params.nu, params.mu_0, params.sigma_0, size=n_samples
-                )
-                score += crps_from_samples(y, samples)
-            elif dist_name == "nig":
-                # Use the NIG distribution's sample method
-                from ..distributions.nig import NIGDistribution
-                nig = NIGDistribution()
-                samples = nig.sample(n_samples, t=0.0, params=params)
-                score += crps_from_samples(y, samples)
+            else:
+                # Use numerical integration for others
+                score += crps_numerical(dist, params, y, t=0.0)
 
         if "log_score" in scoring:
-            if dist_name == "normal":
-                pdf_val = stats.norm.pdf(y, params.mu_0, params.sigma_0)
-            elif dist_name == "student_t":
-                pdf_val = stats.t.pdf(y, params.nu, params.mu_0, params.sigma_0)
-            elif dist_name == "nig":
-                from ..distributions.nig import NIGDistribution
-                nig = NIGDistribution()
-                pdf_val = nig.pdf(np.array([y]), t=0.0, params=params)[0]
+            pdf_val = dist.pdf(np.array([y]), t=0.0, params=params)[0]
             score += log_score(y, pdf_val)
 
         scores.append(score)

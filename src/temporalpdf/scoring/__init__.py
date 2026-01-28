@@ -5,12 +5,13 @@ References:
     Prediction, and Estimation. JASA, 102(477), 359-378.
 """
 
-from .rules import CRPS, LogScore, crps, log_score, crps_normal
+from .rules import CRPS, LogScore, crps, log_score, crps_normal, crps_mc
 
 __all__ = [
     "CRPS",
     "LogScore",
     "crps",
+    "crps_mc",
     "log_score",
     "crps_normal",
 ]
